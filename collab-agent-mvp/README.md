@@ -1,32 +1,71 @@
 # CollabAgent MVP
 
-**多 AI Agent 协作研究报告生成系统 - 最小可行产品**
+**多 AI Agent 协作研究报告生成系统 — 最小可行产品**
 
-用户输入研究主题 → 搜索研究员收集信息 → 报告撰写员生成结构化 Markdown 报告。
+用户输入研究主题 → Researcher 搜索信息 → Writer 撰写报告 → 返回结构化 Markdown。
+
+---
 
 ## 系统架构
 
 ```
-用户 → FastAPI (/research) → LangGraph StateGraph (2 节点)
-                                ├─ research_node (SearchResearcher)
-                                └─ writing_node (ReportWriter)
-                                → 返回 final_report
+用户 → POST /research
+         │
+         ▼
+  FastAPI (api.py)
+         │
+         ▼
+  LangGraph StateGraph (graph.py)
+         │
+         ├─ researcher_node  搜索研究员 (agents/researcher.py)
+         │     └─ search() → DuckDuckGo / Tavily (tools/search.py)
+         │
+         └─ writer_node      报告撰写员 (agents/writer.py)
+               ├─ 质量校验 validate_report()
+               ├─ 自动修复 (校验失败 → LLM 重写)
+               └─ 截断检测续写 _is_truncated() + _continue_report()
+               │
+               ▼
+         返回 Markdown 报告
 ```
 
-- **2 个 Agent**：SearchResearcher（搜索研究员）、ReportWriter（报告撰写员）
+- **2 个 Agent**：Researcher（搜索研究员）、Writer（报告撰写员）
 - **1 条线性工作流**：研究 → 撰写
 - **FastAPI 接口**：`POST /research` 触发任务并获取结果
 
+---
+
 ## 技术栈
 
-| 组件         | 选型                                   |
-| ------------ | -------------------------------------- |
-| 编排框架     | LangGraph 0.2+                         |
-| Agent 框架   | LangChain 0.3+                         |
-| 后端 API     | FastAPI + Uvicorn                      |
-| 模型         | OpenAI GPT-4o-mini                     |
-| 搜索工具     | Tavily Search API / DuckDuckGo 免费搜索 |
-| 状态持久化   | LangGraph MemorySaver（内存级）         |
+| 组件 | 选型 |
+|---|---|
+| 编排框架 | LangGraph 0.2+ |
+| Agent 框架 | LangChain 0.3+ |
+| 后端 API | FastAPI + Uvicorn |
+| LLM | DeepSeek (OpenAI 兼容接口) |
+| 默认搜索 | DuckDuckGo 免费搜索 |
+| 备用搜索 | Tavily Search API（可选） |
+| 状态持久化 | LangGraph MemorySaver（内存级） |
+| 测试 | pytest（55 个测试，不依赖真实 API） |
+| 容器 | Docker (python:3.11-slim) |
+
+---
+
+## 功能特性
+
+| 特性 | 说明 |
+|---|---|
+| 🔍 **双引擎搜索** | DuckDuckGo 默认 + Tavily 备用，自动降级 |
+| 🌐 **代理自动兜底** | 配置 proxy → 失败 → 自动尝试直连 |
+| 📋 **质量校验** | 报告自动检查标题/章节/来源引用完整性 |
+| 🔧 **自动修复** | 校验不通过 → LLM 接收 issue 列表重写一轮 |
+| ✂️ **截断检测续写** | 检测到报告被截断 → 自动续写拼接 |
+| 🔄 **去重** | 多轮搜索结果按 source 去重 |
+| 🧪 **测试覆盖** | 55 个单元测试 + mock 集成测试 |
+| 🐳 **容器化** | 多阶段 Dockerfile 构建 |
+| 🩺 **启动探针** | 启动时自动检测搜索链路连通性 |
+
+---
 
 ## 快速开始
 
@@ -42,60 +81,47 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-编辑 `.env` 文件，填入你的 API Key：
+编辑 `.env` 文件：
 
 ```env
-OPENAI_API_KEY=sk-your-openai-api-key-here
-TAVILY_API_KEY=tvly-your-tavily-api-key-here
+# DeepSeek (优先) 或 OpenAI 兼容接口
+DEEPSEEK_API_KEY=sk-your-key-here
+OPENAI_BASE_URL=https://api.deepseek.com
+OPENAI_MODEL_NAME=deepseek-v4-flash
 
-# 如需使用 DuckDuckGo 免费搜索（无需 API Key）：
-USE_DUCKDUCKGO=true
+# Tavily 搜索（可选，DD 限速时兜底）
+TAVILY_API_KEY=tvly-your-key-here
+
+# 中国大陆用户需配置代理
+HTTP_PROXY=http://127.0.0.1:7890
+HTTPS_PROXY=http://127.0.0.1:7890
 ```
 
 ### 2. 启动服务
-
-#### 方式一：API 服务
 
 ```bash
 uvicorn api:app --reload --host 0.0.0.0 --port 8000
 ```
 
-#### 方式二：离线测试（不启动 FastAPI）
-
-```bash
-python test_graph.py
-```
+启动时会自动运行连通性探针，输出搜索链路状态。
 
 ### 3. 调用 API
 
 ```bash
 curl -X POST http://localhost:8000/research \
   -H "Content-Type: application/json" \
-  -d '{"topic": "2025年全球人工智能发展趋势"}'
+  -d '{"topic": "2026年全球人工智能发展趋势"}'
 ```
 
-**成功响应**（200 OK）：
+**成功响应：**
 
 ```json
 {
   "status": "completed",
   "final_report": "# ... Markdown 报告 ...",
   "search_results": [
-    {
-      "title": "...",
-      "summary": "...",
-      "source": "https://..."
-    }
+    {"title": "...", "summary": "...", "source": "https://..."}
   ]
-}
-```
-
-**错误响应**（500）：
-
-```json
-{
-  "status": "error",
-  "detail": "搜索工具调用失败: ..."
 }
 ```
 
@@ -105,42 +131,83 @@ curl -X POST http://localhost:8000/research \
 curl http://localhost:8000/health
 ```
 
+返回搜索链路和 LLM 配置状态：
+
+```json
+{
+  "status": "ok",
+  "service": "CollabAgent MVP",
+  "checks": {
+    "duckduckgo": "available",
+    "tavily": "not_configured",
+    "llm_key": "configured"
+  }
+}
+```
+
+### 5. 运行测试
+
+```bash
+python -m pytest tests/ -v
+```
+
+### 6. Docker
+
+```bash
+docker build -t collab-agent-mvp .
+docker run -p 8000:8000 --env-file .env collab-agent-mvp
+```
+
+---
+
 ## 项目结构
 
 ```
 collab-agent-mvp/
-├── requirements.txt      # 依赖清单
-├── .env.example          # 环境变量模板
-├── .gitignore
-├── config.py             # 配置加载
+├── api.py                 # FastAPI 服务入口（含启动探针）
+├── config.py              # 配置加载（DeepSeek/搜索/代理）
+├── graph.py               # LangGraph 状态图定义与编译
+├── requirements.txt       # 依赖清单
+├── Dockerfile             # 多阶段容器构建
+├── .env.example           # 环境变量模板
+├── ITERATION.md           # 迭代开发文档（AI 接力用）
+│
 ├── tools/
-│   └── search.py         # 搜索工具封装（Tavily / DuckDuckGo）
+│   └── search.py          # 搜索工具（DD/Tavily/去重/代理降级）
+│
 ├── agents/
-│   ├── researcher.py     # 搜索研究员 Agent
-│   └── writer.py         # 报告撰写员 Agent
-├── graph.py              # LangGraph 状态图定义与编译
-├── api.py                # FastAPI 服务入口
-├── test_graph.py         # 离线测试脚本
-└── README.md
+│   ├── researcher.py      # 搜索研究员（tool calling loop + JSON 三级降级）
+│   └── writer.py          # 报告撰写员（校验/修复/截断检测/续写）
+│
+└── tests/
+    ├── test_search.py      # 去重逻辑 (11)
+    ├── test_researcher.py  # JSON 解析降级 (21)
+    ├── test_writer.py      # 质量校验 (11)
+    ├── test_graph.py       # 图结构 (4)
+    └── test_integration.py # mock 全流程 (8)
 ```
 
-## 验收标准（MVP）
+---
 
-- [x] 发送主题 → 返回包含 2-5 个来源的结构化 Markdown 报告
-- [x] 报告包含：标题、摘要、主要发现、结论，每个发现有来源链接
-- [x] API 返回正确 JSON 结构，状态码 200
-- [x] 错误时返回 500 并包含错误详情
-- [x] 代码结构清晰，注释适量，便于后续迭代
+## 开发迭代记录
 
-## 后续迭代计划
+参见 `ITERATION.md`，包含完整的架构说明、已修复问题、已知限制。
 
-| 迭代 | 功能                                      |
-| ---- | ----------------------------------------- |
-| V0.2 | 引入数据分析师 Agent + Python 代码执行工具 |
-| V0.3 | 辩论子图：研究员-分析师多轮互辩           |
-| V0.4 | 质量审核员 Agent + 报告修订循环           |
-| V0.5 | Human-in-the-loop 人工审批节点             |
-| V0.6 | Redis 会话管理 + 断点续传                 |
-| V0.7 | 向量数据库记忆（Chroma）                   |
-| V0.8 | Langfuse 全链路追踪与成本监控              |
-| V1.0 | 前端 Dashboard（Next.js）                  |
+| 迭代 | 内容 |
+|---|---|
+| Iteration 1 | 基础设施搭建（FastAPI + LangGraph + Agent 骨架） |
+| Iteration 2 | Bug 修复 8 项（JSON 解析、tool loop、SDK 兼容等） |
+| Iteration 3 | 容器化（Dockerfile + .dockerignore） |
+| Iteration 4 | 搜索去重 + JSON 三级降级 + 单元测试 |
+| Iteration 5 | Writer 质量校验 + 自动修复 + Graph 测试 |
+| Iteration 6 | 截断检测续写 + mock 集成测试 |
+| Iteration 7 | 代理自动兜底 + 启动连通性探针 |
+
+---
+
+## 设计原则
+
+1. **搜索永不抛异常** — 所有失败返回 `[]`，Writer 用 LLM 知识兜底
+2. **LLM 调用失败是预期行为** — Researcher 有两层降级，Writer 有异常处理
+3. **客户体验优先** — 失败快速降级，不重试不阻塞
+4. **所有改动需有测试** — 新增功能必须配套测试用例

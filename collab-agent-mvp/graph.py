@@ -1,0 +1,56 @@
+"""
+LangGraph 状态图定义与编译
+包含 ResearchState 类型定义和图构建逻辑
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import List, TypedDict
+
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
+
+from agents.researcher import researcher_node
+from agents.writer import writer_node
+
+logger = logging.getLogger(__name__)
+
+
+class ResearchState(TypedDict):
+    """全局共享状态"""
+    topic: str
+    search_results: List[dict]
+    draft_report: str
+    final_report: str
+    error: str
+
+
+def create_graph() -> StateGraph:
+    """
+    构建并编译 LangGraph 状态图
+
+    节点：
+        - research:      搜索研究员，收集信息
+        - write_report:  报告撰写员，生成 Markdown 报告
+
+    边：
+        research → write_report → END
+    """
+    builder = StateGraph(ResearchState)
+
+    builder.add_node("research", researcher_node)
+    builder.add_node("write_report", writer_node)
+
+    builder.add_edge(START, "research")
+    builder.add_edge("research", "write_report")
+    builder.add_edge("write_report", END)
+
+    # 使用内存 saver，方便调试
+    memory = MemorySaver()
+
+    return builder.compile(checkpointer=memory)
+
+
+# 编译好的图实例，供 api.py 导入使用
+compiled_graph = create_graph()

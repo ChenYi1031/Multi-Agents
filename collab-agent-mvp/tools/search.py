@@ -21,31 +21,47 @@ def _get_proxy() -> Optional[str]:
 
 
 def _search_duckduckgo(query: str, max_results: int = 5) -> List[dict]:
-    """使用 DuckDuckGo v6 SDK 搜索"""
+    """使用 DuckDuckGo v6 SDK 搜索
+    自动尝试：已配置 proxy → 失败后尝试无 proxy → 反过来也试一次
+    """
     try:
         from duckduckgo_search import DDGS
     except ImportError:
         logger.error("duckduckgo_search 未安装")
         return []
 
-    proxy = _get_proxy()
-    results = []
+    # 收集待尝试的 proxy 选项（去重）
+    configured_proxy = _get_proxy()
+    proxy_options = []
+    if configured_proxy:
+        proxy_options.append(configured_proxy)
+    proxy_options.append(None)  # 总是试一次无代理
+    # 如果配置的 proxy 和无代理不同，两个都会试
+    # 如果相同（即未配置），只试一次 None
+    if len(proxy_options) > 1 and configured_proxy is None:
+        proxy_options = [None]
 
-    # 只尝试一次，失败立刻返回空 → writer 将用 LLM 知识兜底
-    try:
-        with DDGS(proxy=proxy, timeout=10) as ddgs:
-            for r in ddgs.text(query, max_results=max_results):
-                results.append({
-                    "title": r.get("title", ""),
-                    "summary": r.get("body", "") or r.get("snippet", ""),
-                    "source": r.get("href", "") or "",
-                })
-        if results:
-            logger.info(f"DuckDuckGo 返回 {len(results)} 条结果")
-            return results
-    except Exception as e:
-        logger.warning(f"DuckDuckGo 搜索失败: {e}")
+    last_error = ""
+    for proxy in proxy_options:
+        results = []
+        proxy_label = proxy if proxy else "直接连接"
+        try:
+            with DDGS(proxy=proxy, timeout=10) as ddgs:
+                for r in ddgs.text(query, max_results=max_results):
+                    results.append({
+                        "title": r.get("title", ""),
+                        "summary": r.get("body", "") or r.get("snippet", ""),
+                        "source": r.get("href", "") or "",
+                    })
+            if results:
+                logger.info(f"DuckDuckGo 返回 {len(results)} 条结果 ({proxy_label})")
+                return results
+        except Exception as e:
+            last_error = str(e)
+            logger.warning(f"DuckDuckGo {proxy_label} 搜索失败: {e}")
+            continue
 
+    logger.warning(f"DuckDuckGo 全部方式失败: {last_error}")
     return []
 
 

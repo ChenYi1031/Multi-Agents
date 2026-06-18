@@ -104,6 +104,15 @@ graph.py  (LangGraph StateGraph)
 | 3 | 续写集成 | `agents/writer.py` | writer_node 中校验后执行截断检测 |
 | 4 | 集成测试 | `tests/test_integration.py` | 8 个测试：mock 全流程 + 截断检测 + 续写验证 |
 
+### Iteration 7 — 代理自动兜底 + 启动探针
+
+| # | 改动 | 文件 | 说明 |
+|---|---|---|---|
+| 1 | DD 搜索 proxy 自动降级 | `tools/search.py` | 配置 proxy 失败 → 自动尝试直连 |
+| 2 | 启动连通性探针 | `api.py` | startup 时检测 DD + Tavily 是否可用 |
+| 3 | /health 增强 | `api.py` | 返回 DD/Tavily/LLM Key 状态 |
+| 4 | 代理配置文档化 | `.env.example` | 添加 HTTP_PROXY/HTTPS_PROXY 说明 |
+
 ---
 
 ## 4. 关键文件速查
@@ -208,17 +217,17 @@ tests/
 
 ### 高优先级
 
-- **代理配置依赖本地工具**。`HTTP_PROXY` 指向 `http://127.0.0.1:7890`，不同环境需修改 `.env` 或系统环境变量。
+- **(已解决) 代理配置依赖本地工具**。DD 搜索已实现自动兜底：配置 proxy → 失败 → 自动降级直连。`.env.example` 有代理说明。`/health` 端点及启动探针包含连通性检查。
 
 ### 中优先级
 
 - **(已解决) Writer 无质量校验**。已实现 `validate_report()` 检查标题/章节/引用/错误标记，失败自动修复一轮。
 
-### 低优先级
+### 剩余（如需实施）
 
 - **无异步支持**。当前 LangGraph 调用是同步的，高并发时会阻塞。
-- **(已解决) 报告长度限制**。已实现 `_is_truncated()` 检测截断 + `_continue_report()` 自动续写。
-- **测试覆盖率**。55 个测试覆盖全部模块，含 mock 集成测试。
+  - 涉及：api.py (async def → sync invoke)、LangGraph 异步编译接口
+  - 复杂度：中，但改动范围大，需要重构 graph.py 和 api.py 调用链
 
 ---
 

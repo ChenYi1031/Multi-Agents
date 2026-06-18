@@ -6,6 +6,7 @@ CollabAgent MVP - FastAPI 服务
 from __future__ import annotations
 
 import logging
+import time
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +14,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from graph import compiled_graph
+from tools.search import _search_duckduckgo, _tavily_available
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,6 +36,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── 启动时连通性探针 ──
+@app.on_event("startup")
+async def startup_probe():
+    """服务启动时检查搜索链路是否可用（不影响启动）"""
+    logger.info("运行搜索连通性探针...")
+    try:
+        t0 = time.time()
+        results = _search_duckduckgo("test", max_results=1)
+        elapsed = time.time() - t0
+        if results:
+            logger.info(f"✓ DuckDuckGo 搜索可用 ({elapsed:.1f}s)")
+        else:
+            logger.warning(f"⚠ DuckDuckGo 搜索无返回 ({elapsed:.1f}s)")
+    except Exception as e:
+        logger.warning(f"⚠ DuckDuckGo 搜索不可用: {e}")
+
+    tavily_ok = _tavily_available()
+    if tavily_ok:
+        logger.info("✓ Tavily API Key 已配置，可用")
+    else:
+        logger.info("ℹ Tavily 未配置，DD 失败时将用 LLM 知识兜底")
 
 
 class ResearchRequest(BaseModel):
@@ -89,4 +114,22 @@ async def research(req: ResearchRequest):
 @app.get("/health")
 async def health():
     """健康检查端点"""
-    return {"status": "ok", "service": "CollabAgent MVP"}
+    from config import OPENAI_API_KEY, TAVILY_API_KEY
+
+    # 快速连通性自检（不阻塞）
+    dd_ok = False
+    try:
+        r = _search_duckduckgo("health", max_results=1)
+        dd_ok = bool(r)
+    except Exception:
+        pass
+
+    return {
+        "status": "ok",
+        "service": "CollabAgent MVP",
+        "checks": {
+            "duckduckgo": "available" if dd_ok else "unavailable",
+            "tavily": "configured" if _tavily_available() else "not_configured",
+            "llm_key": "configured" if OPENAI_API_KEY else "missing",
+        },
+    }

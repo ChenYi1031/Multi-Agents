@@ -1,0 +1,226 @@
+# CollabAgent MVP — 迭代开发文档
+
+> 本文档服务于 **AI → AI 接力开发**，记录当前架构、已修复 Bug、关键决策和待办事项。
+> 后续 AI 接手时，**必须先阅读此文档**，再开始修改代码。
+
+---
+
+## 1. 项目概述
+
+多 Agent 协作研究报告生成系统。用户输入主题 → Researcher 搜索信息 → Writer 撰写报告 → 返回 Markdown。
+
+**栈：** Python 3.11+ · FastAPI · LangGraph · LangChain · DuckDuckGo / Tavily · DeepSeek API
+
+**总入口：** `api.py` → `POST /research`
+**状态图：** `graph.py` → `research → write_report → END`
+
+---
+
+## 2. 架构总览
+
+```
+api.py  (FastAPI 入口)
+  │
+  ▼
+graph.py  (LangGraph StateGraph)
+  │
+  ├─ researcher_node  (agents/researcher.py)
+  │     └─ 调用 search_tool → tools/search.py
+  │            ├─ DuckDuckGo (默认, 免费)
+  │            └─ Tavily (备用, 需 API Key)
+  │
+  └─ writer_node  (agents/writer.py)
+        └─ ChatOpenAI → 输出 Markdown 报告
+```
+
+- 状态定义 `ResearchState`：topic, search_results, draft_report, final_report, error
+- 所有 LLM 调用通过 OpenAI 兼容接口 → 默认 DeepSeek
+- 通过 `config.py` + `.env` 配置
+
+---
+
+## 3. 已完成的迭代与修复
+
+### Iteration 1 — 基础设施搭建
+
+| 改动 | 文件 |
+|---|---|
+| 创建 FastAPI 应用骨架 | `api.py` |
+| 创建 LangGraph 状态图 | `graph.py` |
+| 创建 Researcher Agent 框架 | `agents/researcher.py` |
+| 创建 Writer Agent 框架 | `agents/writer.py` |
+| 创建搜索工具模块 | `tools/search.py` |
+| 配置管理与环境变量 | `config.py`, `.env.example` |
+| 依赖声明 | `requirements.txt` |
+
+### Iteration 2 — Bug 修复 (A→B 接力修复)
+
+| # | 问题 | 根因 | 修复方式 |
+|---|---|---|---|
+| 1 | `ModuleNotFoundError: ToolMessage` | `langchain.schema` 导入路径已废弃 | `from langchain_core.messages import ToolMessage` |
+| 2 | `Could not import ddgs` | duckduckgo_search v6 换了 SDK，langchain wrapper 不兼容 | 直接用 `DDGS` 类，不用 `DuckDuckGoSearchResults` |
+| 3 | JSON 解析失败 — LLM 返回了 tool_call | Researcher 只写了普通聊天调用，没实现 tool calling 循环 | 实现 `_run_tool_loop()`：检测 tool_calls → 执行 → 注入结果 → 重新调用 |
+| 4 | `{{"title"}}` 双大括号输出 | Prompt 中的 `{{` 在字符串中被当成模板语法 | 改为单大括号 `{"title"}` |
+| 5 | DuckDuckGo 限速 202 | 短时间请求过多被 DD 拒绝 | 增加 25 次指数退避重试 + 代理支持 |
+| 6 | Tavily 无 API Key 时报错 | 没 Key 也尝试调用 Tavily SDK | 在 `_search_tavily()` 入口检查 `TAVILY_API_KEY` |
+| 7 | 搜索全失败后 API 返回 500 | Researcher 返回 `{"error": ...}` 导致 Writer 跳过处理 | 返回空列表 `search_results: []`，Writer 用 LLM 知识兜底 |
+| 8 | DuckDuckGo v6 `proxies` 参数弃用 | `DDGS(proxies=...)` → `DDGS(proxy=...)`（字符串） | `_get_proxies()` → `_get_proxy()` 返回 URL 字符串 |
+
+### Iteration 3 — 容器化
+
+| 改动 | 文件 |
+|---|---|
+| 创建多阶段 Dockerfile | `Dockerfile` |
+| 创建 `.dockerignore` | `.dockerignore` |
+| 验证容器构建与启动 | — |
+
+---
+
+## 4. 关键文件速查
+
+### `tools/search.py` — 搜索核心
+
+```
+search(query) → List[dict]    # 对外唯一入口，从不抛异常
+  ├─ _search_duckduckgo()     # 默认后端，25次限速重试
+  └─ _search_tavily()         # 备用后端，无 API Key 时静默跳过
+```
+
+**重要约定：**
+- 所有函数/方法 **永不抛异常**，失败返回 `[]`
+- DuckDuckGo 遇到 `Ratelimit` 重试最多 25 次，等待时间 `min(attempt+2, 10)` 秒
+- 非限速异常直接返回 `[]`
+- 主引擎失败后自动切换另一个引擎兜底
+
+### `agents/researcher.py` — 研究员 Agent
+
+```
+researcher_node(state) → {"search_results": [...]}
+  ├─ 首次：LLM + tool calling loop → JSON 解析
+  ├─ 重试：加严格 prompt → LLM + tool calling loop → JSON 解析
+  └─ 兜底：search(topic) 直接搜 → 返回原始结果
+```
+
+**tool calling loop 逻辑 (**_run_tool_loop_**)：**
+1. 调用 `llm_with_tools.invoke(messages)`
+2. 检测 `response.tool_calls`
+3. 有 tool_call → 执行 search() → 注入 ToolMessage → 继续循环
+4. 无 tool_call → 返回纯文本 response
+5. 最多 5 轮，防止无限循环
+
+**JSON 解析 (_parse_json_from_response_**)：**
+- 支持 ` ```json [...] ``` ` 和纯 JSON
+- 支持单个 dict 和 list[dict]
+
+### `agents/writer.py` — 撰写员 Agent
+
+```
+writer_node(state) → {"draft_report": str, "final_report": str}
+```
+
+- search_results 为空时会提示 "未找到相关搜索结果，请基于你的知识生成报告"
+- 直接调用 LLM 生成 Markdown 报告
+- 要求引用来源 `[标题](URL)` 格式
+
+### `graph.py` — LangGraph 状态图
+
+```
+START → research → write_report → END
+```
+
+简单线性流水线，无条件分支，无循环。
+
+### `api.py` — FastAPI 服务
+
+| 端点 | 方法 | 说明 |
+|---|---|---|
+| `/research` | POST | body: `{"topic": "..."}` 返回报告 |
+| `/health` | GET | 健康检查 |
+
+---
+
+## 5. 已知问题 / 待办
+
+### 高优先级
+
+- **DuckDuckGo 限速仍然可能发生**（25 次重试都失败时直接跳过）。如果项目需要高可用搜索，建议配置 Tavily API Key。
+- **代理配置依赖本地工具**。`HTTP_PROXY` 指向 `http://127.0.0.1:7890`，不同环境需修改 `.env` 或系统环境变量。
+
+### 中优先级
+
+- **Researcher LLM 可能返回非 JSON 内容**。当前有两层降级（重试 + 兜底），但如果 LLM 在 tool calling loop 中始终不返回 JSON，最终结果是空列表。
+- **Tool calling loop 最大 5 轮**。如果 LLM 持续调用工具（罕见），超出后返回最后一次响应，不保证是 JSON。
+- **Writer 无质量校验**。报告质量完全取决于 LLM，没有事实核查或格式验证。
+
+### 低优先级
+
+- **无单元测试**。需要为 search.py、researcher.py、writer.py 添加测试。
+- **无异步支持**。当前 LangGraph 调用是同步的，高并发时会阻塞。
+- **报告长度限制**。LLM 输出可能被 token 限制截断，无分块生成机制。
+- **搜索结果去重**。多个 tool_call 可能搜索相似关键词导致重复结果。
+
+---
+
+## 6. 运行方式
+
+```bash
+# 1. 配置环境变量（API Key、代理等）
+cp .env.example .env
+# 编辑 .env 填入配置
+
+# 2. 安装依赖
+pip install -r requirements.txt
+
+# 3. 启动服务
+uvicorn api:app --reload --host 0.0.0.0 --port 8000
+
+# 4. 测试
+curl -X POST http://localhost:8000/research \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "2026年AI发展趋势"}'
+
+# Docker
+docker build -t collab-agent-mvp .
+docker run -p 8000:8000 --env-file .env collab-agent-mvp
+```
+
+---
+
+## 7. 开发模式 / 注意事项
+
+### 核心原则
+
+1. **搜索永不抛异常** — 所有失败返回 `[]`。Writer 必须能处理空结果。
+2. **LLM 调用失败是预期行为** — Researcher 有两层降级兜底，Writer 有异常处理。
+3. **状态图中 `error` 字段只用于"致命错误"**（如 LLM 调用彻底失败导致无法生成报告）。搜索失败不是致命错误。
+
+### 修改文件的顺序（给 AI 开发者）
+
+```
+1. 先读 ITERATION.md（本文件）→ 了解架构和历史
+2. 再读 config.py → 了解环境配置
+3. 再读 tools/search.py → 底层工具
+4. 再读 agents/researcher.py 和 writer.py → 业务逻辑
+5. 最后改
+```
+
+### 日志级别
+
+- `INFO` — 正常流程（搜索返回、节点执行）
+- `WARNING` — 预期内的失败（搜索失败、重试、兜底）
+- `ERROR` — 非预期失败（LLM 调用失败、配置错误）
+
+---
+
+## 8. 环境变量清单
+
+| 变量 | 必需 | 默认值 | 说明 |
+|---|---|---|---|
+| `DEEPSEEK_API_KEY` | 是 | — | DeepSeek API Key（优先） |
+| `OPENAI_API_KEY` | 否 | — | 兼容 Key（当 DEEPSEEK 未设置时使用） |
+| `OPENAI_BASE_URL` | 否 | `https://api.deepseek.com` | LLM 接口地址 |
+| `OPENAI_MODEL_NAME` | 否 | `deepseek-v4-flash` | 模型名 |
+| `TAVILY_API_KEY` | 否 | — | Tavily 搜索（有空时配置以防 DD 限速） |
+| `USE_DUCKDUCKGO` | 否 | `true` | 是否优先使用 DuckDuckGo |
+| `HTTP_PROXY` | 否 | — | HTTP 代理（中国大陆网络必需） |
+| `HTTPS_PROXY` | 否 | — | HTTPS 代理 |

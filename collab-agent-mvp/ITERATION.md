@@ -85,6 +85,16 @@ graph.py  (LangGraph StateGraph)
 | 5 | 单元测试框架 | `tests/` | pytest，32 个测试覆盖去重 + JSON 解析 |
 | 6 | `pytest` 加入依赖 | `requirements.txt` | `pytest>=8.0.0,<9` |
 
+### Iteration 5 — Writer 质量校验 + 测试全覆盖
+
+| # | 改动 | 文件 | 说明 |
+|---|---|---|---|
+| 1 | 报告质量校验 | `agents/writer.py` | 新增 `validate_report()` — 检查标题/章节/引用/错误标记 |
+| 2 | 自动修复机制 | `agents/writer.py` | 校验失败时 LLM 重写一轮，带具体 issue 反馈 |
+| 3 | 模块化 prompt 构建 | `agents/writer.py` | 抽离 `_build_prompt()` 分离生成与修复逻辑 |
+| 4 | Writer 单元测试 | `tests/test_writer.py` | 11 个测试：空报告、错误标记、章节、引用校验 |
+| 5 | Graph 单元测试 | `tests/test_graph.py` | 4 个测试：状态定义、图编译、节点注册、结构验证 |
+
 ---
 
 ## 4. 关键文件速查
@@ -136,8 +146,14 @@ writer_node(state) → {"draft_report": str, "final_report": str}
 ```
 
 - search_results 为空时会提示 "未找到相关搜索结果，请基于你的知识生成报告"
-- 直接调用 LLM 生成 Markdown 报告
-- 要求引用来源 `[标题](URL)` 格式
+- 调用 LLM 生成 Markdown 报告，要求引用来源 `[标题](URL)` 格式
+- **质量校验**：`validate_report()` 检查：
+  1. 报告非空，不含错误标记
+  2. 有标题（#/##）
+  3. 有摘要/结论/展望等章节
+  4. 有搜索结果时至少引用一个来源 URL
+- **自动修复**：校验失败时，将 issue 列表反馈给 LLM 重写一轮
+- prompt 构建抽离为 `_build_prompt()`，修复时附加 `fix_instruction`
 
 ### `graph.py` — LangGraph 状态图
 
@@ -161,6 +177,8 @@ tests/
   __init__.py
   test_search.py      # deduplicate_results 去重逻辑 (11 tests)
   test_researcher.py  # JSON 解析三级降级 (21 tests)
+  test_writer.py      # validate_report + _build_prompt (11 tests)
+  test_graph.py       # 图编译、状态定义、节点注册 (4 tests)
 ```
 
 运行：`python -m pytest tests/ -v`
@@ -169,6 +187,8 @@ tests/
 - 去重：空列表、无重复、按 source 去重、按 title 去重、混合、边界
 - JSON 解析：代码块、纯数组、叙述包裹、尾部逗号、单引号、Python 字面量
 - 降级兜底：对象片段提取
+- Writer 校验：空报告、错误标记、章节完整性、来源引用
+- Graph：状态定义、编译、节点注册、结构
 
 ---
 
@@ -180,13 +200,13 @@ tests/
 
 ### 中优先级
 
-- **Writer 无质量校验**。报告质量完全取决于 LLM，没有事实核查或格式验证。
+- **(已解决) Writer 无质量校验**。已实现 `validate_report()` 检查标题/章节/引用/错误标记，失败自动修复一轮。
 
 ### 低优先级
 
 - **无异步支持**。当前 LangGraph 调用是同步的，高并发时会阻塞。
 - **报告长度限制**。LLM 输出可能被 token 限制截断，无分块生成机制。
-- **测试覆盖率不足**。已有 32 个测试覆盖去重和 JSON 解析，writer 和 graph 尚未覆盖。
+- **测试覆盖率**。47 个测试覆盖全部模块。可进一步增加集成测试。
 
 ---
 

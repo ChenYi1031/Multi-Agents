@@ -1,6 +1,6 @@
-# CollabAgent MVP
+# CollabAgent 
 
-**多 AI Agent 协作研究报告生成系统 — 最小可行产品**
+**多 AI Agent 协作研究报告生成系统 **
 
 用户输入研究主题 → Researcher 搜索信息 → Writer 撰写报告 → 返回结构化 Markdown。
 

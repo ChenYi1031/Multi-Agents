@@ -114,6 +114,80 @@ def _generate_report(llm, prompt: str) -> str:
 
 
 # ──────────────────────────────────────────────
+# 截断检测与续写
+# ──────────────────────────────────────────────
+
+END_SECTION_KEYWORDS = ["结论", "展望", "总结", "结语", "未来展望"]
+
+
+def _is_truncated(report: str) -> bool:
+    """
+    启发式检测报告是否被 token 限制截断。
+    返回 True 表示可能不完整。
+    """
+    if not report or not report.strip():
+        return False
+
+    lines = report.strip().splitlines()
+
+    # 1. 最后一行是标题（说明开了一个新节但没内容）
+    last_line = lines[-1].strip()
+    if re.match(r'^#{1,3}\s+\S', last_line):
+        return True
+
+    # 2. 结尾没有空行，且最后一句不是完整结束
+    #    (以句号/感叹号/问号结束，或者是 Markdown 分隔符)
+    if not re.search(r'[。！？\n#>\-\*]$', last_line):
+        # 最后一行太短，不像完整的段落结尾
+        if len(last_line) < 30:
+            return True
+
+    # 3. 没有包含任何结束章节关键词
+    text_last_300 = report[-300:] if len(report) > 300 else report
+    has_end_section = any(kw in text_last_300 for kw in END_SECTION_KEYWORDS)
+    if not has_end_section:
+        return True
+
+    return False
+
+
+def _continue_report(llm, report: str, topic: str, results_text: str) -> str:
+    """
+    续写被截断的报告。
+    将已有报告发给 LLM，要求从断点继续。
+    """
+    prompt = f"""你是一位资深报告撰写员。以下是一份关于"{topic}"的报告，但被截断了。
+请从断点处**继续往下写**，不要重复已有内容，直接续写缺失的部分。
+
+已有报告内容：
+{report}
+
+--- 请从这里继续写 ---
+
+要求：
+- 直接从断点处续写，不要重复标题或已有内容。
+- 保持原有的 Markdown 格式和语言风格。
+- 如有搜索源，请继续引用 [来源名称](URL)。
+- 务必包含结论或展望章节作为结尾。
+"""
+    try:
+        response = llm.invoke(prompt)
+        continuation = response.content.strip()
+        # 去重：如果 LLM 重复了已有内容，截断
+        # 取已有报告的最后 50 个字符作为锚点
+        anchor = report[-50:].strip()
+        if anchor and anchor in continuation:
+            idx = continuation.index(anchor) + len(anchor)
+            continuation = continuation[idx:].strip()
+        combined = report.rstrip() + "\n\n" + continuation
+        logger.info(f"报告续写完成，原长度={len(report)}，续写后={len(combined)}")
+        return combined
+    except Exception as e:
+        logger.warning(f"报告续写失败: {e}")
+        return report
+
+
+# ──────────────────────────────────────────────
 # Writer 节点
 # ──────────────────────────────────────────────
 
@@ -165,21 +239,24 @@ def writer_node(state: dict) -> dict:
     issues = validate_report(draft, topic, results)
     if not issues:
         logger.info("报告质量校验通过")
-        return {"draft_report": draft, "final_report": draft}
+    else:
+        # ── 修复一轮 ──
+        logger.warning(f"报告质量校验未通过 ({len(issues)} 项)，尝试修复: {issues}")
+        fix_instruction = (
+            "你上次生成的报告存在以下问题，请修正后重新输出：\n"
+            + "\n".join(f"- {i}" for i in issues)
+            + "\n\n请确保报告结构完整、内容充实。"
+        )
+        try:
+            prompt = _build_prompt(topic, research_text, fix_instruction)
+            draft = _generate_report(llm, prompt)
+            logger.info("报告修复完成")
+        except Exception as e:
+            logger.error(f"报告修复失败，使用原始版本: {e}")
 
-    # ── 修复一轮 ──
-    logger.warning(f"报告质量校验未通过 ({len(issues)} 项)，尝试修复: {issues}")
-    fix_instruction = (
-        "你上次生成的报告存在以下问题，请修正后重新输出：\n"
-        + "\n".join(f"- {i}" for i in issues)
-        + "\n\n请确保报告结构完整、内容充实。"
-    )
-    try:
-        prompt = _build_prompt(topic, research_text, fix_instruction)
-        draft = _generate_report(llm, prompt)
-        # 修复后不再校验，直接输出（防无限循环）
-        logger.info("报告修复完成")
-    except Exception as e:
-        logger.error(f"报告修复失败，使用原始版本: {e}")
+    # ── 截断检测与续写 ──
+    if _is_truncated(draft):
+        logger.warning("检测到报告可能被截断，尝试续写")
+        draft = _continue_report(llm, draft, topic, research_text)
 
     return {"draft_report": draft, "final_report": draft}

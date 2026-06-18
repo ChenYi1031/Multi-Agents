@@ -95,6 +95,15 @@ graph.py  (LangGraph StateGraph)
 | 4 | Writer 单元测试 | `tests/test_writer.py` | 11 个测试：空报告、错误标记、章节、引用校验 |
 | 5 | Graph 单元测试 | `tests/test_graph.py` | 4 个测试：状态定义、图编译、节点注册、结构验证 |
 
+### Iteration 6 — 截断续写 + 集成测试
+
+| # | 改动 | 文件 | 说明 |
+|---|---|---|---|
+| 1 | 截断检测 | `agents/writer.py` | 新增 `_is_truncated()` — 检查结尾/结束章节/末尾完整性 |
+| 2 | 自动续写 | `agents/writer.py` | 新增 `_continue_report()` — 从断点续写并拼接去重 |
+| 3 | 续写集成 | `agents/writer.py` | writer_node 中校验后执行截断检测 |
+| 4 | 集成测试 | `tests/test_integration.py` | 8 个测试：mock 全流程 + 截断检测 + 续写验证 |
+
 ---
 
 ## 4. 关键文件速查
@@ -170,24 +179,27 @@ START → research → write_report → END
 | `/research` | POST | body: `{"topic": "..."}` 返回报告 |
 | `/health` | GET | 健康检查 |
 
-### `tests/` — 单元测试
+### `tests/` — 单元测试 + 集成测试
 
 ```
 tests/
   __init__.py
-  test_search.py      # deduplicate_results 去重逻辑 (11 tests)
-  test_researcher.py  # JSON 解析三级降级 (21 tests)
-  test_writer.py      # validate_report + _build_prompt (11 tests)
-  test_graph.py       # 图编译、状态定义、节点注册 (4 tests)
+  test_search.py       # deduplicate_results 去重逻辑 (11 tests)
+  test_researcher.py   # JSON 解析三级降级 (21 tests)
+  test_writer.py       # validate_report + _build_prompt (11 tests)
+  test_graph.py        # 图编译、状态定义、节点注册 (4 tests)
+  test_integration.py  # mock 全流程 + 截断检测 + 续写 (8 tests)
 ```
 
-运行：`python -m pytest tests/ -v`
+运行：`python -m pytest tests/ -v`（55 tests, 不依赖真实 API）
 
 测试覆盖：
 - 去重：空列表、无重复、按 source 去重、按 title 去重、混合、边界
 - JSON 解析：代码块、纯数组、叙述包裹、尾部逗号、单引号、Python 字面量
 - 降级兜底：对象片段提取
 - Writer 校验：空报告、错误标记、章节完整性、来源引用
+- 截断检测：结尾标题、缺失章节、完整报告判断
+- 集成：全流程 mock（搜索→Researcher→Writer→报告）、空搜索兜底
 - Graph：状态定义、编译、节点注册、结构
 
 ---
@@ -205,8 +217,8 @@ tests/
 ### 低优先级
 
 - **无异步支持**。当前 LangGraph 调用是同步的，高并发时会阻塞。
-- **报告长度限制**。LLM 输出可能被 token 限制截断，无分块生成机制。
-- **测试覆盖率**。47 个测试覆盖全部模块。可进一步增加集成测试。
+- **(已解决) 报告长度限制**。已实现 `_is_truncated()` 检测截断 + `_continue_report()` 自动续写。
+- **测试覆盖率**。55 个测试覆盖全部模块，含 mock 集成测试。
 
 ---
 

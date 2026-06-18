@@ -90,6 +90,31 @@ def _search_tavily(query: str, max_results: int = 5) -> List[dict]:
         return []
 
 
+def deduplicate_results(results: List[dict]) -> List[dict]:
+    """
+    按 source URL 去重，保留首次出现的条目。
+    无 source 的条目按 title 去重；两者皆无则保留。
+    """
+    seen_sources: set = set()
+    seen_titles: set = set()
+    deduped: List[dict] = []
+    for r in results:
+        src_raw = r.get("source")
+        src = str(src_raw).strip() if src_raw is not None else ""
+        title_raw = r.get("title")
+        title = str(title_raw).strip() if title_raw is not None else ""
+        if src and src in seen_sources:
+            continue
+        if not src and title and title in seen_titles:
+            continue
+        if src:
+            seen_sources.add(src)
+        if title:
+            seen_titles.add(title)
+        deduped.append(r)
+    return deduped
+
+
 def search(query: str) -> List[dict]:
     """
     搜索并返回结构化结果列表

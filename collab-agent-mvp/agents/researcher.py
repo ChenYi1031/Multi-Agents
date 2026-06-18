@@ -9,14 +9,14 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import List
+from typing import List, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain.tools import tool
 from langchain_openai import ChatOpenAI
 
 from config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL_NAME
-from tools.search import search
+from tools.search import deduplicate_results, search
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,7 @@ RESEARCHER_PROMPT = """你是一位专业的研究助理。你的任务是根据
 - 每个信息点必须包含: title (简短标题), summary (2-3 句话的摘要), source (URL)。
 - 优先使用近期、权威的来源。
 - 输出格式必须是严格的 JSON 数组，不要包含任何其他文字。
+- 不要使用 {{ 或 }}，使用单大括号。
 
 示例输出：
 [
@@ -36,20 +37,90 @@ RESEARCHER_PROMPT = """你是一位专业的研究助理。你的任务是根据
 ]"""
 
 
+def _extract_json_array(text: str) -> Optional[str]:
+    """
+    从文本中提取 JSON 数组字符串。
+    优先级：```json 代码块 > [...] 包裹 > 全文
+    """
+    if not text or not text.strip():
+        return None
+
+    # 1. ```json [...] ``` 或 ``` [...] ```
+    block = re.search(r'```(?:json)?\s*(\[\s*[\s\S]*?\s*\])\s*```', text)
+    if block:
+        return block.group(1)
+
+    # 2. 直接找 [...] 包裹的最外层数组
+    #    从第一个 [ 匹配到最后一个 ]
+    start = text.find("[")
+    end = text.rfind("]")
+    if start != -1 and end > start:
+        candidate = text[start:end + 1]
+        # 粗略校验：内容是 JSON 可解析的
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            pass
+
+    # 3. 全文尝试解析
+    return text.strip()
+
+
+def _clean_json_string(s: str) -> str:
+    """清理常见 JSON 格式问题"""
+    # 去除尾部逗号 (Python json 不支持 trailing comma)
+    s = re.sub(r',\s*([\]}])', r'\1', s)
+    # 单引号 → 双引号
+    s = re.sub(r"(?<!\\)'", '"', s)
+    # True/False/None → true/false/null
+    s = re.sub(r'\bTrue\b', 'true', s)
+    s = re.sub(r'\bFalse\b', 'false', s)
+    s = re.sub(r'\bNone\b', 'null', s)
+    return s
+
+
 def _parse_json_from_response(content: str) -> List[dict]:
-    """从 LLM 响应中解析 JSON 数组，处理 ```json``` 代码块和纯 JSON"""
+    """
+    从 LLM 响应中解析 JSON 数组，多级降级。
+    
+    降级链：```json 代码块 > [...] 外层包裹 > 全文 JSON
+    > 清洗后重试 > 提取任意 {...} 包裹
+    """
     if not content or not content.strip():
         raise ValueError("响应内容为空")
 
-    json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', content)
-    json_str = json_match.group(1) if json_match else content.strip()
+    extracted = _extract_json_array(content)
 
-    results = json.loads(json_str)
-    if isinstance(results, list):
-        return results
-    elif isinstance(results, dict):
-        return [results]
-    raise ValueError(f"JSON 格式不正确: 期望列表或字典，得到 {type(results)}")
+    # 尝试直接解析
+    for attempt in range(2):
+        try:
+            results = json.loads(extracted)
+            if isinstance(results, list):
+                return results
+            elif isinstance(results, dict):
+                return [results]
+            raise ValueError(f"JSON 格式不正确: 期望列表或字典，得到 {type(results)}")
+        except json.JSONDecodeError:
+            if attempt == 0:
+                # 第一次失败 → 清洗后重试
+                extracted = _clean_json_string(extracted)
+                continue
+            # 第二次还失败 → 尝试提取所有 {...} 对象
+            logger.warning("JSON 解析失败，尝试提取对象片段")
+            objects = re.findall(r'\{[^{}]*\}', extracted)
+            results = []
+            for obj_str in objects:
+                try:
+                    obj_str = _clean_json_string(obj_str)
+                    parsed = json.loads(obj_str)
+                    if isinstance(parsed, dict):
+                        results.append(parsed)
+                except json.JSONDecodeError:
+                    continue
+            if results:
+                return results
+            raise ValueError(f"无法从响应中提取 JSON: {content[:300]}")
 
 
 def _build_llm(**kwargs):
@@ -62,12 +133,13 @@ def _build_llm(**kwargs):
     )
 
 
-def _run_tool_loop(llm_with_tools, messages: list) -> AIMessage:
+def _run_tool_loop(llm: ChatOpenAI, llm_with_tools, messages: list) -> AIMessage:
     """
     执行工具调用循环：
-    1. 调用 LLM
+    1. 调用 LLM（带工具）
     2. 如果有 tool_calls，逐个执行并注入结果
     3. 重复直到 LLM 返回纯文本内容
+    4. 5 轮超限后，用不带工具的 LLM 强制输出 JSON
     """
     for attempt in range(5):  # 防止无限循环
         response: AIMessage = llm_with_tools.invoke(messages)
@@ -78,6 +150,7 @@ def _run_tool_loop(llm_with_tools, messages: list) -> AIMessage:
 
         # 检查是否有 tool calls
         if not hasattr(response, "tool_calls") or not response.tool_calls:
+            logger.info(f"工具调用循环在 {attempt+1} 轮完成")
             return response  # 纯文本响应，退出循环
 
         # 执行所有 tool calls
@@ -106,9 +179,13 @@ def _run_tool_loop(llm_with_tools, messages: list) -> AIMessage:
                     tool_call_id=tool_call_id,
                 ))
 
-    # 超限后返回最后一次响应
-    logger.warning("工具调用循环达到最大次数")
-    return response
+    # ── 超限兜底：用不带工具的 LLM 强制输出 JSON ──
+    logger.warning("工具调用循环达到最大次数，强制 LLM 输出 JSON")
+    messages.append(SystemMessage(
+        content="你已用完工具调用次数。请基于已有信息，直接输出 JSON 数组结果，不要调用任何工具。"
+    ))
+    final_response: AIMessage = llm.invoke(messages)
+    return final_response
 
 
 def researcher_node(state: dict) -> dict:
@@ -136,9 +213,10 @@ def researcher_node(state: dict) -> dict:
             SystemMessage(content=RESEARCHER_PROMPT),
             HumanMessage(content=f"研究主题：{topic}"),
         ]
-        response = _run_tool_loop(llm_with_tools, messages)
+        response = _run_tool_loop(llm, llm_with_tools, messages)
         search_results = _parse_json_from_response(response.content)
-        return {"search_results": search_results}
+        # 去重
+        return {"search_results": deduplicate_results(search_results)}
     except Exception as e:
         logger.warning(f"第一次 JSON 解析失败，重试: {e}")
 
@@ -149,9 +227,9 @@ def researcher_node(state: dict) -> dict:
             HumanMessage(content=f"研究主题：{topic}"),
             SystemMessage(content="请确保输出严格的 JSON 数组格式，不要包含额外的文字说明。"),
         ]
-        response = _run_tool_loop(llm_with_tools, messages)
+        response = _run_tool_loop(llm, llm_with_tools, messages)
         search_results = _parse_json_from_response(response.content)
-        return {"search_results": search_results}
+        return {"search_results": deduplicate_results(search_results)}
     except Exception as e:
         logger.error(f"JSON 解析重试仍失败: {e}")
 
@@ -160,7 +238,7 @@ def researcher_node(state: dict) -> dict:
         try:
             raw_results = search(topic)
             if raw_results:
-                return {"search_results": raw_results}
+                return {"search_results": deduplicate_results(raw_results)}
         except Exception as e2:
             logger.error(f"兜底搜索也失败: {e2}")
 

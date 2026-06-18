@@ -74,6 +74,17 @@ graph.py  (LangGraph StateGraph)
 | 创建 `.dockerignore` | `.dockerignore` |
 | 验证容器构建与启动 | — |
 
+### Iteration 4 — 韧性提升 + 单元测试
+
+| # | 改动 | 文件 | 说明 |
+|---|---|---|---|
+| 1 | 搜索结果去重 | `tools/search.py` | 新增 `deduplicate_results()`，按 source→title 去重 |
+| 2 | Tool calling loop 超限兜底 | `agents/researcher.py` | 5 轮超限后移除工具绑定，强制 LLM 输出 JSON |
+| 3 | JSON 解析多级降级 | `agents/researcher.py` | `_extract_json_array` + `_clean_json_string` + 对象片段提取 |
+| 4 | 搜索结果去重集成 | `agents/researcher.py` | 所有返回路径都经过 `deduplicate_results()` |
+| 5 | 单元测试框架 | `tests/` | pytest，32 个测试覆盖去重 + JSON 解析 |
+| 6 | `pytest` 加入依赖 | `requirements.txt` | `pytest>=8.0.0,<9` |
+
 ---
 
 ## 4. 关键文件速查
@@ -81,15 +92,17 @@ graph.py  (LangGraph StateGraph)
 ### `tools/search.py` — 搜索核心
 
 ```
-search(query) → List[dict]    # 对外唯一入口，从不抛异常
-  ├─ _search_duckduckgo()     # 默认后端，25次限速重试
-  └─ _search_tavily()         # 备用后端，无 API Key 时静默跳过
+search(query) → List[dict]           # 对外唯一入口，从不抛异常
+  ├─ _search_duckduckgo()            # 默认后端
+  ├─ _search_tavily()                # 备用后端，无 API Key 时静默跳过
+  └─ deduplicate_results(list)       # 按 source→title 去重，供 researcher 调用
 ```
 
 **重要约定：**
 - 所有函数/方法 **永不抛异常**，失败返回 `[]`
 - DuckDuckGo 任何异常**直接返回**，不重试 → Writer 用 LLM 知识兜底
 - 主引擎失败后自动切换另一个引擎兜底
+- 搜索结果经过 `deduplicate_results()` 去重后进入报告
 
 ### `agents/researcher.py` — 研究员 Agent
 
@@ -106,10 +119,15 @@ researcher_node(state) → {"search_results": [...]}
 3. 有 tool_call → 执行 search() → 注入 ToolMessage → 继续循环
 4. 无 tool_call → 返回纯文本 response
 5. 最多 5 轮，防止无限循环
+6. ⚠ 5 轮超限 → **移除工具绑定**，用裸 `llm.invoke()` 强制输出 JSON
 
-**JSON 解析 (_parse_json_from_response_**)：**
-- 支持 ` ```json [...] ``` ` 和纯 JSON
-- 支持单个 dict 和 list[dict]
+**JSON 解析 (_parse_json_from_response_**)——三级降级：**
+1. ` ```json [...] ``` ` 代码块
+2. `[...]` 外层包裹提取
+3. 清洗（去尾部逗号、单引号→双引号、True/None→true/null）
+4. 提取所有 `{...}` 对象片段拼装
+
+**搜索结果去重：** 所有返回路径都经过 `deduplicate_results()`
 
 ### `agents/writer.py` — 撰写员 Agent
 
@@ -136,6 +154,22 @@ START → research → write_report → END
 | `/research` | POST | body: `{"topic": "..."}` 返回报告 |
 | `/health` | GET | 健康检查 |
 
+### `tests/` — 单元测试
+
+```
+tests/
+  __init__.py
+  test_search.py      # deduplicate_results 去重逻辑 (11 tests)
+  test_researcher.py  # JSON 解析三级降级 (21 tests)
+```
+
+运行：`python -m pytest tests/ -v`
+
+测试覆盖：
+- 去重：空列表、无重复、按 source 去重、按 title 去重、混合、边界
+- JSON 解析：代码块、纯数组、叙述包裹、尾部逗号、单引号、Python 字面量
+- 降级兜底：对象片段提取
+
 ---
 
 ## 5. 已知问题 / 待办
@@ -146,16 +180,13 @@ START → research → write_report → END
 
 ### 中优先级
 
-- **Researcher LLM 可能返回非 JSON 内容**。当前有两层降级（重试 + 兜底），但如果 LLM 在 tool calling loop 中始终不返回 JSON，最终结果是空列表。
-- **Tool calling loop 最大 5 轮**。如果 LLM 持续调用工具（罕见），超出后返回最后一次响应，不保证是 JSON。
 - **Writer 无质量校验**。报告质量完全取决于 LLM，没有事实核查或格式验证。
 
 ### 低优先级
 
-- **无单元测试**。需要为 search.py、researcher.py、writer.py 添加测试。
 - **无异步支持**。当前 LangGraph 调用是同步的，高并发时会阻塞。
 - **报告长度限制**。LLM 输出可能被 token 限制截断，无分块生成机制。
-- **搜索结果去重**。多个 tool_call 可能搜索相似关键词导致重复结果。
+- **测试覆盖率不足**。已有 32 个测试覆盖去重和 JSON 解析，writer 和 graph 尚未覆盖。
 
 ---
 

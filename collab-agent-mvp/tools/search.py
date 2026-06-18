@@ -31,30 +31,21 @@ def _search_duckduckgo(query: str, max_results: int = 5) -> List[dict]:
     proxy = _get_proxy()
     results = []
 
-    # 遇到限速时最多重试 25 次，每次间隔递增
-    for attempt in range(25):
-        try:
-            with DDGS(proxy=proxy, timeout=10) as ddgs:
-                for r in ddgs.text(query, max_results=max_results):
-                    results.append({
-                        "title": r.get("title", ""),
-                        "summary": r.get("body", "") or r.get("snippet", ""),
-                        "source": r.get("href", "") or "",
-                    })
-            if results:
-                logger.info(f"DuckDuckGo 返回 {len(results)} 条结果 (尝试 {attempt+1})")
-                return results
-        except Exception as e:
-            err_str = str(e)
-            if "Ratelimit" in err_str:
-                wait = min(attempt + 2, 10)  # 等待时间递增，最长 10s
-                logger.warning(f"DuckDuckGo 限速 (第{attempt+1}/25次)，{wait}s 后重试...")
-                time.sleep(wait)
-                continue
-            logger.warning(f"DuckDuckGo 搜索失败: {e}")
-            return []
+    # 只尝试一次，失败立刻返回空 → writer 将用 LLM 知识兜底
+    try:
+        with DDGS(proxy=proxy, timeout=10) as ddgs:
+            for r in ddgs.text(query, max_results=max_results):
+                results.append({
+                    "title": r.get("title", ""),
+                    "summary": r.get("body", "") or r.get("snippet", ""),
+                    "source": r.get("href", "") or "",
+                })
+        if results:
+            logger.info(f"DuckDuckGo 返回 {len(results)} 条结果")
+            return results
+    except Exception as e:
+        logger.warning(f"DuckDuckGo 搜索失败: {e}")
 
-    logger.error(f"DuckDuckGo 限速重试 25 次均失败")
     return []
 
 

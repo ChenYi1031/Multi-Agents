@@ -61,7 +61,7 @@ graph.py  (LangGraph StateGraph)
 | 2 | `Could not import ddgs` | duckduckgo_search v6 换了 SDK，langchain wrapper 不兼容 | 直接用 `DDGS` 类，不用 `DuckDuckGoSearchResults` |
 | 3 | JSON 解析失败 — LLM 返回了 tool_call | Researcher 只写了普通聊天调用，没实现 tool calling 循环 | 实现 `_run_tool_loop()`：检测 tool_calls → 执行 → 注入结果 → 重新调用 |
 | 4 | `{{"title"}}` 双大括号输出 | Prompt 中的 `{{` 在字符串中被当成模板语法 | 改为单大括号 `{"title"}` |
-| 5 | DuckDuckGo 限速 202 | 短时间请求过多被 DD 拒绝 | 增加 25 次指数退避重试 + 代理支持 |
+| 5 | DuckDuckGo 限速 202 | 短时间请求过多被 DD 拒绝 | 失败直接返回空，Writer 用 LLM 知识兜底，客户体验优先 |
 | 6 | Tavily 无 API Key 时报错 | 没 Key 也尝试调用 Tavily SDK | 在 `_search_tavily()` 入口检查 `TAVILY_API_KEY` |
 | 7 | 搜索全失败后 API 返回 500 | Researcher 返回 `{"error": ...}` 导致 Writer 跳过处理 | 返回空列表 `search_results: []`，Writer 用 LLM 知识兜底 |
 | 8 | DuckDuckGo v6 `proxies` 参数弃用 | `DDGS(proxies=...)` → `DDGS(proxy=...)`（字符串） | `_get_proxies()` → `_get_proxy()` 返回 URL 字符串 |
@@ -88,8 +88,7 @@ search(query) → List[dict]    # 对外唯一入口，从不抛异常
 
 **重要约定：**
 - 所有函数/方法 **永不抛异常**，失败返回 `[]`
-- DuckDuckGo 遇到 `Ratelimit` 重试最多 25 次，等待时间 `min(attempt+2, 10)` 秒
-- 非限速异常直接返回 `[]`
+- DuckDuckGo 任何异常**直接返回**，不重试 → Writer 用 LLM 知识兜底
 - 主引擎失败后自动切换另一个引擎兜底
 
 ### `agents/researcher.py` — 研究员 Agent
@@ -143,7 +142,6 @@ START → research → write_report → END
 
 ### 高优先级
 
-- **DuckDuckGo 限速仍然可能发生**（25 次重试都失败时直接跳过）。如果项目需要高可用搜索，建议配置 Tavily API Key。
 - **代理配置依赖本地工具**。`HTTP_PROXY` 指向 `http://127.0.0.1:7890`，不同环境需修改 `.env` 或系统环境变量。
 
 ### 中优先级

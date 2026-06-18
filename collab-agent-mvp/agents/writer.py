@@ -10,9 +10,19 @@ import logging
 
 from langchain_openai import ChatOpenAI
 
-from config import OPENAI_API_KEY, OPENAI_MODEL_NAME
+from config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL_NAME
 
 logger = logging.getLogger(__name__)
+
+
+def _build_llm(**kwargs):
+    """构建 ChatOpenAI 实例，自动注入通用配置"""
+    return ChatOpenAI(
+        model=OPENAI_MODEL_NAME,
+        api_key=OPENAI_API_KEY,
+        base_url=OPENAI_BASE_URL,
+        **kwargs,
+    )
 
 
 def writer_node(state: dict) -> dict:
@@ -62,11 +72,7 @@ def writer_node(state: dict) -> dict:
 """
 
     # 初始化 LLM，temperature 设中等以保证写作质量
-    llm = ChatOpenAI(
-        model=OPENAI_MODEL_NAME,
-        api_key=OPENAI_API_KEY,
-        temperature=0.7,
-    )
+    llm = _build_llm(temperature=0.7)
 
     try:
         response = llm.invoke(prompt)

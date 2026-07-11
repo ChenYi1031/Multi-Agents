@@ -3,14 +3,15 @@
 **多 AI Agent 协作研究报告生成系统 — 最小可行产品**
 
 用户输入研究主题 → Researcher 搜索信息 → Writer 撰写报告 → 返回结构化 Markdown。
+配备 Vue 3 + Element Plus 前端，提供实时 SSE 流式进度展示。
 
 ---
 
 ## 系统架构
 
 ```
-用户 → POST /research
-         │
+用户 → 前端 (Vue 3 + Element Plus)
+         │  SSE /research/stream?topic=...
          ▼
   FastAPI (api.py)
          │
@@ -26,12 +27,13 @@
                └─ 截断检测续写 _is_truncated() + _continue_report()
                │
                ▼
-         返回 Markdown 报告
+         返回 Markdown 报告 → 前端渲染展示
 ```
 
 - **2 个 Agent**：Researcher（搜索研究员）、Writer（报告撰写员）
 - **1 条线性工作流**：研究 → 撰写
-- **FastAPI 接口**：`POST /research` 触发任务并获取结果
+- **前端**：Vue 3 + Element Plus，支持 SSE 实时流式进度展示
+- **API 接口**：`POST /research` + `GET /research/stream`(SSE) + `GET /health`
 
 ---
 
@@ -47,6 +49,8 @@
 | 备用搜索 | Tavily Search API（可选） |
 | 状态持久化 | LangGraph MemorySaver（内存级） |
 | 测试 | pytest（55 个测试，不依赖真实 API） |
+| 前端框架 | Vue 3 + Vite |
+| UI 组件库 | Element Plus |
 | 容器 | Docker (python:3.11-slim) |
 
 ---
@@ -63,7 +67,9 @@
 | 🔄 **去重** | 多轮搜索结果按 source 去重 |
 | 🧪 **测试覆盖** | 55 个单元测试 + mock 集成测试 |
 | 🐳 **容器化** | 多阶段 Dockerfile 构建 |
-| 🩺 **启动探针** | 启动时自动检测搜索链路连通性 |
+| 🖥️ **Web 前端** | Vue 3 + Element Plus，SSE 实时流式进度展示 |
+| 🔌 **SSE 流式接口** | `GET /research/stream` 实时推送 Agent 工作进度 |
+| 🩺 **配置探针** | 启动时快速检查搜索/LLM 配置状态（不阻塞） |
 
 ---
 
@@ -97,61 +103,70 @@ HTTP_PROXY=http://127.0.0.1:7890
 HTTPS_PROXY=http://127.0.0.1:7890
 ```
 
-### 2. 启动服务
+### 2. 启动后端服务
 
 ```bash
 uvicorn api:app --reload --host 0.0.0.0 --port 8000
 ```
 
-启动时会自动运行连通性探针，输出搜索链路状态。
+### 3. 启动前端（开发模式）
 
-### 3. 调用 API
+新开一个终端：
 
 ```bash
+cd web
+npm install
+npm run dev
+```
+
+前端默认运行在 `http://localhost:5173`，会自动代理 API 请求到后端。
+
+**生产部署：** 前端构建后由 FastAPI 自动托管：
+
+```bash
+cd web
+npm run build   # 产出 dist/，api.py 自动挂载
+```
+
+### 4. 调用 API
+
+```bash
+# 非流式接口
 curl -X POST http://localhost:8000/research \
   -H "Content-Type: application/json" \
   -d '{"topic": "2026年全球人工智能发展趋势"}'
+
+# 流式 SSE 接口（推荐，前端使用）
+curl http://localhost:8000/research/stream?topic=2026年全球人工智能发展趋势
 ```
 
-**成功响应：**
-
-```json
-{
-  "status": "completed",
-  "final_report": "# ... Markdown 报告 ...",
-  "search_results": [
-    {"title": "...", "summary": "...", "source": "https://..."}
-  ]
-}
-```
-
-### 4. 健康检查
+### 5. 健康检查
 
 ```bash
 curl http://localhost:8000/health
 ```
 
-返回搜索链路和 LLM 配置状态：
+返回搜索和 LLM 配置状态：
 
 ```json
 {
   "status": "ok",
   "service": "CollabAgent MVP",
   "checks": {
-    "duckduckgo": "available",
+    "duckduckgo": "unavailable",
     "tavily": "not_configured",
     "llm_key": "configured"
   }
 }
 ```
 
-### 5. 运行测试
+### 6. 运行测试
 
 ```bash
 python -m pytest tests/ -v
 ```
 
-### 6. Docker
+### 7. Docker
 
 ```bash
 docker build -t collab-agent-mvp .
@@ -179,6 +194,18 @@ collab-agent-mvp/
 │   ├── researcher.py      # 搜索研究员（tool calling loop + JSON 三级降级）
 │   └── writer.py          # 报告撰写员（校验/修复/截断检测/续写）
 │
+├── web/                   # Vue 3 + Element Plus 前端
+│   ├── src/
+│   │   ├── App.vue           # 主界面
+│   │   ├── main.js           # 入口
+│   │   └── components/
+│   │       ├── ResearchInput.vue   # 研究主题输入
+│   │       ├── ProgressPanel.vue   # SSE 实时进度展示
+│   │       └── ReportPanel.vue     # 报告展示+下载
+│   ├── index.html
+│   ├── vite.config.js
+│   └── package.json
+│
 └── tests/
     ├── test_search.py      # 去重逻辑 (11)
     ├── test_researcher.py  # JSON 解析降级 (21)
@@ -194,7 +221,7 @@ collab-agent-mvp/
 参见 `ITERATION.md`，包含完整的架构说明、已修复问题、已知限制。
 
 | 迭代 | 内容 |
-|---|---|
+|---|---|---|
 | Iteration 1 | 基础设施搭建（FastAPI + LangGraph + Agent 骨架） |
 | Iteration 2 | Bug 修复 8 项（JSON 解析、tool loop、SDK 兼容等） |
 | Iteration 3 | 容器化（Dockerfile + .dockerignore） |
@@ -202,6 +229,7 @@ collab-agent-mvp/
 | Iteration 5 | Writer 质量校验 + 自动修复 + Graph 测试 |
 | Iteration 6 | 截断检测续写 + mock 集成测试 |
 | Iteration 7 | 代理自动兜底 + 启动连通性探针 |
+| Iteration 8 | Vue 3 + Element Plus 前端 + SSE 流式展示 + 搜索/探针优化 |
 
 ---
 

@@ -9,9 +9,10 @@
 
 多 Agent 协作研究报告生成系统。用户输入主题 → Researcher 搜索信息 → Writer 撰写报告 → 返回 Markdown。
 
-**栈：** Python 3.11+ · FastAPI · LangGraph · LangChain · DuckDuckGo / Tavily · DeepSeek API
+**栈：** Python 3.11+ · FastAPI · LangGraph · LangChain · DuckDuckGo / Tavily · DeepSeek API · Vue 3 · Element Plus
 
-**总入口：** `api.py` → `POST /research`
+**总入口：** `api.py` → `POST /research` / `GET /research/stream`
+**前端入口：** `web/` → Vue 3 + Element Plus → SSE → `GET /research/stream`
 **状态图：** `graph.py` → `research → write_report → END`
 
 ---
@@ -19,6 +20,9 @@
 ## 2. 架构总览
 
 ```
+Vue 3 前端 (web/src/)   ←  用户输入主题 SSE 流式展示
+  │  GET /research/stream?topic=...
+  ▼
 api.py  (FastAPI 入口)
   │
   ▼
@@ -26,11 +30,11 @@ graph.py  (LangGraph StateGraph)
   │
   ├─ researcher_node  (agents/researcher.py)
   │     └─ 调用 search_tool → tools/search.py
-  │            ├─ DuckDuckGo (默认, 免费)
+  │            ├─ DuckDuckGo (默认, 免费, timeout=3s)
   │            └─ Tavily (备用, 需 API Key)
   │
   └─ writer_node  (agents/writer.py)
-        └─ ChatOpenAI → 输出 Markdown 报告
+        └─ ChatOpenAI → 输出 Markdown 报告 → 返回前端渲染
 ```
 
 - 状态定义 `ResearchState`：topic, search_results, draft_report, final_report, error
@@ -113,6 +117,18 @@ graph.py  (LangGraph StateGraph)
 | 3 | /health 增强 | `api.py` | 返回 DD/Tavily/LLM Key 状态 |
 | 4 | 代理配置文档化 | `.env.example` | 添加 HTTP_PROXY/HTTPS_PROXY 说明 |
 
+### Iteration 8 — Vue 3 前端 + SSE 流式展示 + 搜索/探针优化
+
+| # | 改动 | 文件 | 说明 |
+|---|---|---|---|
+| 1 | Vue 3 + Element Plus 前端项目 | `web/` | Vite 构建，含输入、进度、报告三个组件 |
+| 2 | SSE 流式进度端点 | `api.py` | 新增 `GET /research/stream`，实时推送 Agent 阶段 |
+| 3 | 前端静态文件托管 | `api.py` | production 模式自动挂载 `web/dist` |
+| 4 | 前端开发代理 | `web/vite.config.js` | 开发时 proxy API 到 localhost:8000 |
+| 5 | 启动探针改为非阻塞 | `api.py` | 启动探针仅检查配置，不再等待 DD 超时 |
+| 6 | DD 搜索超时缩减 | `tools/search.py` | DDGS timeout 从 10s 降为 3s |
+| 7 | 代理默认注释 | `.env` / `.env.example` | 避免无代理时阻塞所有 HTTP 请求 |
+
 ---
 
 ## 4. 关键文件速查
@@ -186,7 +202,30 @@ START → research → write_report → END
 | 端点 | 方法 | 说明 |
 |---|---|---|
 | `/research` | POST | body: `{"topic": "..."}` 返回报告 |
+| `/research/stream` | GET | SSE 流式推送研究进度 + 最终报告 |
 | `/health` | GET | 健康检查 |
+
+### `web/` — Vue 3 + Element Plus 前端
+
+```
+web/
+├── src/
+│   ├── App.vue                   # 主界面：Header + 路由组件
+│   ├── main.js                   # Vue 入口，注册 Element Plus
+│   ├── style.css                 # 全局 Markdown 渲染样式
+│   ├── components/
+│   │   ├── ResearchInput.vue     # 研究主题输入 + 热门标签
+│   │   ├── ProgressPanel.vue     # SSE 进度展示（时间线+进度条+日志）
+│   │   └── ReportPanel.vue       # 报告渲染（marked）+ 搜索结果表 + 下载
+├── index.html
+├── vite.config.js                # 开发代理 /research → :8000
+└── package.json
+```
+
+**SSE 事件流：** 前端通过 `EventSource` 监听 `/research/stream`：
+- `progress` → 更新阶段（research/writing/research_done/writing_done）
+- `complete` → 接收 `{report, search_results}` 渲染报告
+- `error` → 显示错误信息
 
 ### `tests/` — 单元测试 + 集成测试
 

@@ -46,7 +46,7 @@ def _search_duckduckgo(query: str, max_results: int = 5) -> List[dict]:
         results = []
         proxy_label = proxy if proxy else "直接连接"
         try:
-            with DDGS(proxy=proxy, timeout=10) as ddgs:
+            with DDGS(proxy=proxy, timeout=3) as ddgs:
                 for r in ddgs.text(query, max_results=max_results):
                     results.append({
                         "title": r.get("title", ""),

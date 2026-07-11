@@ -22,3 +22,7 @@ Thumbs.db
 
 # 日志
 *.log
+
+# 软著申请材料
+software_info.json
+*.pdf

@@ -117,6 +117,24 @@ graph.py  (LangGraph StateGraph)
 | 3 | /health 增强 | `api.py` | 返回 DD/Tavily/LLM Key 状态 |
 | 4 | 代理配置文档化 | `.env.example` | 添加 HTTP_PROXY/HTTPS_PROXY 说明 |
 
+### Iteration 9 — 全异步化 + SSE 取消 + thread_id + 前端历史 (本迭代)
+
+| # | 改动 | 文件 | 说明 |
+|---|---|---|---|
+| 1 | Researcher 节点异步化 | `agents/researcher.py` | `researcher_node` 改为 async，LLM 调用使用 `ainvoke()` |
+| 2 | Writer 节点异步化 | `agents/writer.py` | `writer_node` 改为 async，续写/生成均使用 `ainvoke()` |
+| 3 | API 全面异步 | `api.py` | POST `/research` 使用 `ainvoke()`，SSE 手动 await 编排节点 |
+| 4 | 唯一 thread_id | `api.py` | 每次请求生成 uuid，不再硬编码 "1" |
+| 5 | SSE 取消机制 | `api.py` | `asyncio.Event` 信号 + `DELETE /research/stream/{task_id}` + 阶段检查点 |
+| 6 | 活跃任务管理 | `api.py` | `StreamTask` 数据类 + `GET /research/stream/active` 管理端点 |
+| 7 | SSE _sse_safe | `api.py` | 新增 `_sse_safe()` 保护 JSON 序列化不崩溃流 |
+| 8 | 前端取消按钮 | `ProgressPanel.vue` | 研究中显示「取消研究」按钮，发射 cancel 事件 |
+| 9 | 前端研究历史 | `App.vue` | localStorage 持久化，时间线展示，点击恢复，历史上限 20 条 |
+| 10 | 测试适配 async | `tests/` | 集成测试使用 `ainvoke()`，mock 改为 `_make_async_mock()` |
+| 11 | 测试覆盖 | `tests/test_graph.py` | 新增 `test_graph_ainvoke_supported` |
+| 12 | 配置更新 | `requirements.txt` | 新增 `pytest-asyncio` |
+| 13 | 脆弱测试修复 | `tests/test_graph.py` | 移除 `test_graph_invoke_no_api` 的环境变量污染 |
+
 ### Iteration 8 — Vue 3 前端 + SSE 流式展示 + 搜索/探针优化
 
 | # | 改动 | 文件 | 说明 |

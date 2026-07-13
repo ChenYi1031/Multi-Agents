@@ -48,7 +48,7 @@
 | 默认搜索 | DuckDuckGo 免费搜索 |
 | 备用搜索 | Tavily Search API（可选） |
 | 状态持久化 | LangGraph MemorySaver（内存级） |
-| 测试 | pytest（55 个测试，不依赖真实 API） |
+| 测试 | pytest + pytest-asyncio（55 个测试，不依赖真实 API） |
 | 前端框架 | Vue 3 + Vite |
 | UI 组件库 | Element Plus |
 | 容器 | Docker (python:3.11-slim) |
@@ -68,8 +68,12 @@
 | 🧪 **测试覆盖** | 55 个单元测试 + mock 集成测试 |
 | 🐳 **容器化** | 多阶段 Dockerfile 构建 |
 | 🖥️ **Web 前端** | Vue 3 + Element Plus，SSE 实时流式进度展示 |
-| 🔌 **SSE 流式接口** | `GET /research/stream` 实时推送 Agent 工作进度 |
+| 🔌 **SSE 流式接口** | `GET /research/stream` 实时推送 Agent 工作进度，支持取消 |
 | 🩺 **配置探针** | 启动时快速检查搜索/LLM 配置状态（不阻塞） |
+| ⚡ **全异步执行** | Agent 节点使用 `ainvoke()`，SSE 流不阻塞事件循环 |
+| 🔑 **请求隔离** | 每次研究请求使用唯一 `thread_id`，并发安全 |
+| 🛑 **任务取消** | `DELETE /research/stream/{task_id}` 优雅取消研究中任务 |
+| 📋 **研究历史** | 前端 localStorage 持久化，最多保留 20 条记录 |
 
 ---
 
@@ -230,6 +234,7 @@ collab-agent-mvp/
 | Iteration 6 | 截断检测续写 + mock 集成测试 |
 | Iteration 7 | 代理自动兜底 + 启动连通性探针 |
 | Iteration 8 | Vue 3 + Element Plus 前端 + SSE 流式展示 + 搜索/探针优化 |
+| Iteration 9 | 全异步化 + SSE 取消 + thread_id 隔离 + 前端历史 + 测试适配 |
 
 ---
 

@@ -3,7 +3,7 @@
     <div class="token-header">
       <div class="token-title-row">
         <el-icon :size="18"><DataAnalysis /></el-icon>
-        <h3 class="token-title">Token 用量统计</h3>
+        <h3 class="token-title">{{ t('tokenUsage') }}</h3>
       </div>
       <el-tag
         :type="totalCost > 0 ? 'warning' : 'info'"
@@ -17,16 +17,16 @@
     <!-- Summary numbers -->
     <div class="token-summary">
       <div class="token-stat">
-        <span class="stat-label">输入</span>
+        <span class="stat-label">{{ t('inputTokens') }}</span>
         <span class="stat-value">{{ formatNumber(totalInput) }}</span>
       </div>
       <el-icon class="stat-arrow"><ArrowRight /></el-icon>
       <div class="token-stat">
-        <span class="stat-label">输出</span>
+        <span class="stat-label">{{ t('outputTokens') }}</span>
         <span class="stat-value">{{ formatNumber(totalOutput) }}</span>
       </div>
       <div class="token-stat total">
-        <span class="stat-label">总计</span>
+        <span class="stat-label">{{ t('total') }}</span>
         <span class="stat-value highlight">{{ formatNumber(totalTokens) }}</span>
       </div>
     </div>
@@ -34,7 +34,7 @@
     <!-- Per-agent breakdown -->
     <div v-if="agentBreakdown.length > 1" class="token-breakdown">
       <el-divider />
-      <h4 class="breakdown-title">按 Agent</h4>
+      <h4 class="breakdown-title">{{ t('byAgent') }}</h4>
       <div
         v-for="agent in agentBreakdown"
         :key="agent.agent"
@@ -42,7 +42,7 @@
       >
         <div class="agent-info">
           <span class="agent-name">{{ agent.label }}</span>
-          <span class="agent-calls">{{ agent.call_count }} 次调用</span>
+          <span class="agent-calls">{{ agent.call_count }} {{ t('calls') }}</span>
         </div>
         <div class="agent-bar-wrapper">
           <el-progress
@@ -60,8 +60,8 @@
     <div v-if="calls.length > 0" class="token-detail">
       <el-divider />
       <div class="detail-header">
-        <h4 class="breakdown-title">调用明细</h4>
-        <span class="detail-count">{{ calls.length }} 次</span>
+        <h4 class="breakdown-title">{{ t('callDetail') }}</h4>
+        <span class="detail-count">{{ calls.length }} {{ t('calls') }}</span>
       </div>
       <div class="call-list">
         <div
@@ -71,12 +71,12 @@
           :class="'call-agent-' + (call.agent || 'unknown')"
         >
           <div class="call-top">
-            <span class="call-agent-tag">{{ AGENT_LABELS[call.agent] || call.agent }}</span>
+            <span class="call-agent-tag">{{ agentLabel(call.agent) || call.agent }}</span>
             <span class="call-cost">¥{{ call.cost.toFixed(6) }}</span>
           </div>
           <div class="call-bars">
             <div class="call-bar-group">
-              <span class="call-bar-label">输入</span>
+              <span class="call-bar-label">{{ t('inputTokens') }}</span>
               <div class="call-bar-track">
                 <div
                   class="call-bar-fill input-fill"
@@ -86,7 +86,7 @@
               <span class="call-bar-val">{{ call.input_tokens.toLocaleString() }}</span>
             </div>
             <div class="call-bar-group">
-              <span class="call-bar-label">输出</span>
+              <span class="call-bar-label">{{ t('outputTokens') }}</span>
               <div class="call-bar-track">
                 <div
                   class="call-bar-fill output-fill"
@@ -112,6 +112,7 @@
 <script setup>
 import { computed } from 'vue'
 import { DataAnalysis, ArrowRight, Timer } from '@element-plus/icons-vue'
+import { useI18n } from '../utils/i18n'
 
 const props = defineProps({
   tokenUsage: {
@@ -120,13 +121,14 @@ const props = defineProps({
   },
 })
 
+const { t } = useI18n()
+
 const AGENT_COLORS = {
   researcher: '#409eff',
   writer: '#67c23a',
 }
-const AGENT_LABELS = {
-  researcher: '搜索研究员',
-  writer: '报告撰写员',
+function agentLabel(key) {
+  return t(key === 'researcher' ? 'researcher' : 'writer')
 }
 
 const totalInput = computed(() => props.tokenUsage?.total_input_tokens ?? 0)
@@ -144,7 +146,7 @@ const agentBreakdown = computed(() => {
   const total = raw.reduce((s, a) => s + a.total_tokens, 0) || 1
   return raw.map((a) => ({
     ...a,
-    label: AGENT_LABELS[a.agent] || a.agent,
+    label: agentLabel(a.agent) || a.agent,
     color: AGENT_COLORS[a.agent] || '#909399',
     percentage: Math.round((a.total_tokens / total) * 100),
   }))
@@ -156,7 +158,7 @@ function buildBreakdownFromCalls() {
     if (!groups[c.agent]) {
       groups[c.agent] = {
         agent: c.agent,
-        label: AGENT_LABELS[c.agent] || c.agent,
+        label: agentLabel(c.agent) || c.agent,
         total_input_tokens: 0,
         total_output_tokens: 0,
         total_tokens: 0,
@@ -225,7 +227,7 @@ function formatNumber(n) {
 }
 
 .token-stat.total {
-  background: #f0f9ff;
+  background: var(--el-color-primary-light-9);
   border-radius: 8px;
   padding: 8px 16px;
 }
@@ -233,22 +235,22 @@ function formatNumber(n) {
 .stat-label {
   display: block;
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   margin-bottom: 4px;
 }
 
 .stat-value {
   font-size: 22px;
   font-weight: 700;
-  color: #303133;
+  color: var(--el-text-color-primary);
 }
 
 .stat-value.highlight {
-  color: #409eff;
+  color: var(--el-color-primary);
 }
 
 .stat-arrow {
-  color: #c0c4cc;
+  color: var(--el-text-color-placeholder);
   font-size: 16px;
 }
 
@@ -260,7 +262,7 @@ function formatNumber(n) {
   font-size: 14px;
   font-weight: 600;
   margin: 0 0 8px;
-  color: #606266;
+  color: var(--el-text-color-regular);
 }
 
 .agent-row {
@@ -277,12 +279,12 @@ function formatNumber(n) {
 .agent-name {
   font-size: 13px;
   font-weight: 500;
-  color: #303133;
+  color: var(--el-text-color-primary);
 }
 
 .agent-calls {
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 
 .agent-bar-wrapper {
@@ -297,7 +299,7 @@ function formatNumber(n) {
 
 .agent-cost {
   font-size: 12px;
-  color: #e6a23c;
+  color: var(--el-color-warning);
   white-space: nowrap;
   min-width: 72px;
   text-align: right;
@@ -320,7 +322,7 @@ function formatNumber(n) {
 
 .detail-count {
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 
 .call-list {
@@ -330,23 +332,23 @@ function formatNumber(n) {
 }
 
 .call-item {
-  background: #f8f9fa;
+  background: var(--el-fill-color);
   border-radius: 8px;
   padding: 10px 12px;
-  border-left: 3px solid #dcdfe6;
+  border-left: 3px solid var(--el-border-color);
   transition: background 0.15s;
 }
 
 .call-item:hover {
-  background: #f0f2f5;
+  background: var(--el-fill-color-light);
 }
 
 .call-item.call-agent-researcher {
-  border-left-color: #409eff;
+  border-left-color: var(--el-color-primary);
 }
 
 .call-item.call-agent-writer {
-  border-left-color: #67c23a;
+  border-left-color: var(--el-color-success);
 }
 
 .call-top {
@@ -359,15 +361,15 @@ function formatNumber(n) {
 .call-agent-tag {
   font-size: 12px;
   font-weight: 600;
-  color: #303133;
-  background: #e8eaed;
+  color: var(--el-text-color-primary);
+  background: var(--el-fill-color);
   padding: 1px 8px;
   border-radius: 4px;
 }
 
 .call-cost {
   font-size: 12px;
-  color: #e6a23c;
+  color: var(--el-color-warning);
   font-weight: 500;
 }
 
@@ -386,7 +388,7 @@ function formatNumber(n) {
 
 .call-bar-label {
   font-size: 11px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   width: 20px;
   text-align: right;
   flex-shrink: 0;
@@ -395,7 +397,7 @@ function formatNumber(n) {
 .call-bar-track {
   flex: 1;
   height: 6px;
-  background: #e8eaed;
+  background: var(--el-fill-color);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -408,16 +410,16 @@ function formatNumber(n) {
 }
 
 .input-fill {
-  background: linear-gradient(90deg, #409eff, #79bbff);
+  background: linear-gradient(90deg, var(--el-color-primary), var(--el-color-primary-light-5));
 }
 
 .output-fill {
-  background: linear-gradient(90deg, #67c23a, #95d475);
+  background: linear-gradient(90deg, var(--el-color-success), var(--el-color-success-light-5));
 }
 
 .call-bar-val {
   font-size: 11px;
-  color: #606266;
+  color: var(--el-text-color-regular);
   width: 50px;
   text-align: right;
   flex-shrink: 0;
@@ -435,6 +437,6 @@ function formatNumber(n) {
   align-items: center;
   gap: 3px;
   font-size: 11px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 </style>

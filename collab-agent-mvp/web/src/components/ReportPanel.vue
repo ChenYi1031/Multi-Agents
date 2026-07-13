@@ -5,10 +5,10 @@
       <div class="card-header">
         <h3 class="card-title">
           <el-icon :size="18"><Link /></el-icon>
-          搜索结果（{{ searchResults.length }} 条）
+          {{ t('searchResults') }}（{{ searchResults.length }} {{ t('countSuffix') }}）
         </h3>
         <el-button size="small" text @click="showSearchResults = !showSearchResults">
-          {{ showSearchResults ? '收起' : '展开' }}
+          {{ showSearchResults ? t('collapse') : t('expand') }}
         </el-button>
       </div>
       <el-collapse-transition>
@@ -39,14 +39,14 @@
       <div class="card-header">
         <h3 class="card-title">
           <el-icon :size="18"><Finished /></el-icon>
-          事实核查报告
+          {{ t('factCheckReport') }}
         </h3>
         <div class="fact-check-score">
           <el-tag :type="scoreType" size="small" effect="dark">
-            评分 {{ factCheck.score }}/10
+            {{ t('score') }} {{ factCheck.score }}/10
           </el-tag>
           <el-button size="small" text @click="showFactCheck = !showFactCheck">
-            {{ showFactCheck ? '收起' : '展开' }}
+            {{ showFactCheck ? t('collapse') : t('expand') }}
           </el-button>
         </div>
       </div>
@@ -81,19 +81,19 @@
     <el-card class="report-card" shadow="hover">
       <div class="card-header report-header">
         <div class="header-left">
-          <h3 class="card-title">
-            <el-icon :size="18"><Notebook /></el-icon>
-            研究报告
-          </h3>
-          <el-tag type="success" size="small" effect="light" v-if="report">
-            已生成
-          </el-tag>
+            <h3 class="card-title">
+              <el-icon :size="18"><Notebook /></el-icon>
+              {{ t('reportTitle') }}
+            </h3>
+            <el-tag type="success" size="small" effect="light" v-if="report">
+              {{ t('generated') }}
+            </el-tag>
         </div>
         <div class="header-actions">
-          <el-dropdown v-if="report" trigger="click" @command="handleExport">
+            <el-dropdown v-if="report" trigger="click" @command="handleExport">
             <el-button size="small" :loading="exporting">
               <el-icon><Download /></el-icon>
-              导出
+              {{ t('exportText') }}
             </el-button>
             <template #dropdown>
               <el-dropdown-menu>
@@ -107,13 +107,13 @@
           </el-button>
           <el-button size="small" type="danger" plain @click="$emit('clear')">
             <el-icon><Delete /></el-icon>
-            清除
+            {{ t('clearText') }}
           </el-button>
         </div>
       </div>
       <div class="report-body">
         <div v-if="!report" class="report-empty">
-          <el-empty description="暂无报告内容，请输入研究主题开始" />
+          <el-empty :description="t('emptyReportDesc')" />
         </div>
         <div v-else class="report-content" v-html="renderedReport" />
       </div>
@@ -124,19 +124,19 @@
       <div class="card-header">
         <h3 class="card-title">
           <el-icon :size="18"><ChatLineSquare /></el-icon>
-          追问
+          {{ t('followupTitle') }}
         </h3>
         <el-button size="small" text @click="showFollowUp = !showFollowUp">
-          {{ showFollowUp ? '收起' : '展开' }}
+          {{ showFollowUp ? t('collapse') : t('expand') }}
         </el-button>
       </div>
       <el-collapse-transition>
         <div v-show="showFollowUp" class="followup-body">
-          <p class="followup-desc">基于当前研究报告发起追问，AI 将增量搜索并更新报告</p>
+          <p class="followup-desc">{{ t('followupDesc') }}</p>
           <div class="followup-input-row">
             <el-input
               v-model="followUpQuestion"
-              placeholder="输入追问内容…"
+              :placeholder="t('followupPlaceholder')"
               :disabled="followUpLoading"
               size="large"
               clearable
@@ -149,7 +149,7 @@
               :disabled="!followUpQuestion.trim()"
               @click="handleFollowUp"
             >
-              追问
+              {{ followUpLoading ? t('followupLoading') : t('followupSubmit') }}
             </el-button>
           </div>
         </div>
@@ -162,6 +162,7 @@
 import { ref, computed } from 'vue'
 import { Link, Notebook, Download, Delete, Finished, ChatLineSquare } from '@element-plus/icons-vue'
 import { marked } from 'marked'
+import { useI18n } from '../utils/i18n'
 
 const props = defineProps({
   report: { type: String, default: '' },
@@ -173,6 +174,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['clear', 'followup'])
+
+const { t } = useI18n()
 
 const showSearchResults = ref(true)
 const showFactCheck = ref(true)

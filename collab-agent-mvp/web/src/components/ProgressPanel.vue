@@ -2,13 +2,13 @@
   <el-card class="progress-card" shadow="hover">
     <!-- Title + event count -->
     <div class="progress-header">
-      <h3 class="progress-title">
-        <el-icon :size="18"><DataAnalysis /></el-icon>
-        研究进度
-      </h3>
-      <el-tag type="info" size="small" effect="plain">
-        {{ progressLog.length }} 条事件
-      </el-tag>
+        <h3 class="progress-title">
+          <el-icon :size="18"><DataAnalysis /></el-icon>
+          {{ t('progressTitle') }}
+        </h3>
+        <el-tag type="info" size="small" effect="plain">
+          {{ progressLog.length }} {{ t('eventsFormat') }}
+        </el-tag>
     </div>
 
     <!-- Circle Progress Row -->
@@ -41,7 +41,7 @@
     <!-- Cancel Button -->
     <div v-if="showCancel" class="cancel-row">
       <el-button type="danger" size="small" plain :icon="Close" @click="$emit('cancel')">
-        取消研究
+        {{ t('cancelResearch') }}
       </el-button>
     </div>
 
@@ -49,14 +49,14 @@
     <div class="log-section">
       <div class="log-section-title">
         <el-icon :size="14"><Tickets /></el-icon>
-        <span>运行日志</span>
+        <span>{{ t('logTitle') }}</span>
       </div>
       <div class="log-container" ref="logContainer">
         <div v-for="log in progressLog" :key="log.id" class="log-entry" :class="'log-' + log.type">
           <span class="log-time">{{ log.time }}</span>
           <span class="log-message">{{ log.message }}</span>
         </div>
-        <div v-if="progressLog.length === 0" class="log-empty">暂无事件</div>
+        <div v-if="progressLog.length === 0" class="log-empty">{{ t('logEmpty') }}</div>
       </div>
     </div>
   </el-card>

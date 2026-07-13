@@ -3,8 +3,8 @@
     <div class="knowledge-header" @click="expanded = !expanded">
       <div class="knowledge-title">
         <el-icon :size="18"><FolderOpened /></el-icon>
-        <span>知识库 (RAG)</span>
-        <el-tag v-if="chunks.length" size="small" type="info">{{ chunks.length }} 块</el-tag>
+        <span>{{ t('knowledgeBase') }} (RAG)</span>
+        <el-tag v-if="chunks.length" size="small" type="info">{{ chunks.length }} {{ t('chunks') }}</el-tag>
       </div>
       <el-icon :class="['chevron', { rotated: expanded }]"><ArrowDown /></el-icon>
     </div>
@@ -23,7 +23,7 @@
           >
             <el-button type="primary" size="small" :loading="uploading">
               <el-icon><Upload /></el-icon>
-              上传文件 (.txt/.pdf)
+              {{ t('uploadFile') }} (.txt/.pdf)
             </el-button>
           </el-upload>
           <el-button
@@ -34,7 +34,7 @@
             @click="handleClear"
           >
             <el-icon><Delete /></el-icon>
-            清空
+            {{ t('clear') }}
           </el-button>
         </div>
 
@@ -51,7 +51,7 @@
 
         <!-- Chunks list -->
         <div v-if="chunks.length" class="chunks-list">
-          <p class="chunks-summary">{{ chunks.length }} 个文档块</p>
+          <p class="chunks-summary">{{ chunks.length }} {{ t('chunks') }}</p>
           <div class="chunk-items">
             <div v-for="(c, i) in chunks.slice(0, 10)" :key="i" class="chunk-item">
               <span class="chunk-source">{{ c.source || '未知' }}</span>
@@ -73,7 +73,9 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { FolderOpened, ArrowDown, Upload, Delete } from '@element-plus/icons-vue'
+import { useI18n } from '../utils/i18n'
 
+const { t } = useI18n()
 const expanded = ref(false)
 const uploading = ref(false)
 const chunks = ref([])
@@ -146,7 +148,7 @@ async function handleClear() {
 }
 
 .knowledge-header:hover {
-  background: #f5f7fa;
+  background: var(--el-fill-color-light);
 }
 
 .knowledge-title {
@@ -155,13 +157,13 @@ async function handleClear() {
   gap: 6px;
   font-size: 13px;
   font-weight: 600;
-  color: #606266;
+  color: var(--el-text-color-regular);
 }
 
 .chevron {
   transition: transform 0.3s ease;
   font-size: 14px;
-  color: #c0c4cc;
+  color: var(--el-text-color-placeholder);
 }
 
 .chevron.rotated {
@@ -195,7 +197,7 @@ async function handleClear() {
 }
 
 .chunk-item {
-  background: #f8f9fa;
+  background: var(--el-fill-color);
   border-radius: 4px;
   padding: 6px 8px;
   font-size: 12px;
@@ -204,18 +206,18 @@ async function handleClear() {
 
 .chunk-source {
   font-weight: 500;
-  color: #409eff;
+  color: var(--el-color-primary);
   display: block;
   margin-bottom: 2px;
 }
 
 .chunk-preview {
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 
 .chunk-more {
   font-size: 12px;
-  color: #c0c4cc;
+  color: var(--el-text-color-placeholder);
   text-align: center;
   padding: 4px 0;
 }
@@ -226,6 +228,6 @@ async function handleClear() {
 
 .empty-text {
   font-size: 12px;
-  color: #c0c4cc;
+  color: var(--el-text-color-placeholder);
 }
 </style>

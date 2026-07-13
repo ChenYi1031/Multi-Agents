@@ -4,14 +4,14 @@
     <div class="settings-header" @click="expanded = !expanded">
       <div class="settings-title">
         <el-icon :size="16"><Setting /></el-icon>
-        <span>模型供应商</span>
+        <span>{{ t('modelProvider') }}</span>
         <el-tag v-if="activeProvider" size="small" type="success" effect="light">
           {{ activeProvider.name }}
         </el-tag>
       </div>
       <div class="settings-header-right">
         <el-button size="small" text @click.stop="openAddDialog">
-          <el-icon><Plus /></el-icon> 添加
+          <el-icon><Plus /></el-icon> {{ t('add') }}
         </el-button>
         <el-icon :class="['chevron', { rotated: expanded }]"><ArrowDown /></el-icon>
       </div>
@@ -24,17 +24,17 @@
         <!-- ── General Preferences ── -->
         <div class="prefs-section">
           <div class="pref-row">
-            <span class="pref-label">主题</span>
+            <span class="pref-label">{{ t('theme') }}</span>
             <el-radio-group :model-value="theme" size="small" @change="$emit('update:theme', $event)">
-              <el-radio-button value="light">☀️ 浅色</el-radio-button>
-              <el-radio-button value="dark">🌙 深色</el-radio-button>
+              <el-radio-button value="light">☀️ {{ t('light') }}</el-radio-button>
+              <el-radio-button value="dark">🌙 {{ t('dark') }}</el-radio-button>
             </el-radio-group>
           </div>
           <div class="pref-row">
-            <span class="pref-label">语言</span>
+            <span class="pref-label">{{ t('lang') }}</span>
             <el-radio-group :model-value="lang" size="small" @change="$emit('update:lang', $event)">
-              <el-radio-button value="zh">中文</el-radio-button>
-              <el-radio-button value="en">English</el-radio-button>
+              <el-radio-button value="zh">{{ t('chinese') }}</el-radio-button>
+              <el-radio-button value="en">{{ t('english') }}</el-radio-button>
             </el-radio-group>
           </div>
         </div>
@@ -43,8 +43,8 @@
 
         <!-- ── Provider Section ── -->
         <div v-if="providers.length === 0" class="empty-hint">
-          <el-empty description="暂未配置供应商" :image-size="60">
-            <el-button type="primary" size="small" @click="openAddDialog">添加供应商</el-button>
+          <el-empty :description="t('emptyProvider')" :image-size="60">
+            <el-button type="primary" size="small" @click="openAddDialog">{{ t('addProvider') }}</el-button>
           </el-empty>
         </div>
 
@@ -82,7 +82,7 @@
     </el-collapse-transition>
 
     <!-- Add/Edit Dialog -->
-    <el-dialog v-model="dialogVisible" :title="editingProvider ? '编辑供应商' : '添加供应商'" width="520px" :close-on-click-modal="false">
+    <el-dialog v-model="dialogVisible" :title="editingProvider ? t('editProvider') : t('addProvider')" width="520px" :close-on-click-modal="false">
       <el-form :model="form" label-position="top" size="small">
         <el-form-item label="名称" required>
           <el-input v-model="form.name" placeholder="如：智谱 GLM、DeepSeek" />
@@ -125,12 +125,15 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { Setting, ArrowDown, Plus, Edit, Delete } from '@element-plus/icons-vue'
+import { useI18n } from '../utils/i18n'
 
 const props = defineProps({
   theme: { type: String, default: 'light' },
   lang: { type: String, default: 'zh' },
 })
 const emit = defineEmits(['change', 'update:theme', 'update:lang'])
+
+const { t } = useI18n()
 
 const expanded = ref(false)
 const providers = ref([])
@@ -283,7 +286,7 @@ defineExpose({
 }
 
 .settings-header:hover {
-  background: #f5f7fa;
+  background: var(--el-fill-color-light);
 }
 
 .settings-title {
@@ -292,7 +295,7 @@ defineExpose({
   gap: 6px;
   font-size: 13px;
   font-weight: 600;
-  color: #606266;
+  color: var(--el-text-color-regular);
 }
 
 .settings-header-right {
@@ -304,7 +307,7 @@ defineExpose({
 .chevron {
   transition: transform 0.3s ease;
   font-size: 14px;
-  color: #c0c4cc;
+  color: var(--el-text-color-placeholder);
 }
 
 .chevron.rotated {
@@ -332,7 +335,7 @@ defineExpose({
 .pref-label {
   font-size: 12px;
   font-weight: 500;
-  color: #606266;
+  color: var(--el-text-color-regular);
   white-space: nowrap;
 }
 
@@ -346,7 +349,7 @@ defineExpose({
   padding: 8px 10px;
   margin-bottom: 8px;
   transition: all 0.2s;
-  background: #fff;
+  background: var(--el-bg-color);
 }
 
 .provider-card.active {

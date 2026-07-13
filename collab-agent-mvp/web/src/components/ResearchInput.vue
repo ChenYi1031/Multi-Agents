@@ -4,16 +4,16 @@
       <div class="form-header">
         <h2 class="form-title">
           <el-icon :size="20"><Promotion /></el-icon>
-          输入研究主题
+          {{ t('researchTitle') }}
         </h2>
         <p class="form-desc">
-          输入你想研究的任何主题，AI 研究员将自动搜索信息并生成专业报告
+          {{ t('researchDesc') }}
         </p>
       </div>
       <div class="form-input-row">
         <el-input
           v-model="topic"
-          placeholder="请输入研究主题，例如：2026年全球人工智能发展趋势"
+          :placeholder="t('researchPlaceholder')"
           :disabled="loading"
           size="large"
           clearable
@@ -32,18 +32,18 @@
           class="submit-btn"
         >
           <el-icon v-if="!loading"><Document /></el-icon>
-          <span v-if="loading">研究中...</span>
-          <span v-else>开始研究</span>
+          <span v-if="loading">{{ t('researching') }}</span>
+          <span v-else>{{ t('startResearch') }}</span>
         </el-button>
       </div>
       <div class="form-options">
         <el-checkbox v-model="useLlm" :disabled="loading" size="small">
-          LLM 参与（勾选后将搜索结果交给 AI 二次加工生成结构化报告）
+          {{ t('llmLabel') }}
         </el-checkbox>
       </div>
       <!-- Example topics -->
       <div class="example-topics">
-        <span class="example-label">热门主题：</span>
+        <span class="example-label">{{ t('hotTopics') }}</span>
         <el-tag
           v-for="example in examples"
           :key="example"
@@ -63,6 +63,7 @@
 <script setup>
 import { ref } from 'vue'
 import { Promotion, Search, Document } from '@element-plus/icons-vue'
+import { useI18n } from '../utils/i18n'
 
 const emit = defineEmits(['submit'])
 const props = defineProps({
@@ -71,6 +72,8 @@ const props = defineProps({
     default: false,
   },
 })
+
+const { t } = useI18n()
 
 const topic = ref('')
 const useLlm = ref(true)

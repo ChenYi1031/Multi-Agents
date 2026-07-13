@@ -13,8 +13,8 @@
           </button>
           <el-icon :size="24" class="header-icon"><Connection /></el-icon>
           <div class="header-text">
-            <h1 class="app-title">CollabAgent</h1>
-            <span class="app-subtitle">研究报告</span>
+            <h1 class="app-title">{{ t('appTitle') }}</h1>
+            <span class="app-subtitle">{{ t('appSubtitle') }}</span>
           </div>
         </div>
         <div class="header-right">
@@ -37,7 +37,7 @@
           <div class="sidebar-header">
             <div class="sidebar-header-title">
               <el-icon :size="16"><Clock /></el-icon>
-              <span>历史记录</span>
+              <span>{{ t('sidebarHistory') }}</span>
             </div>
             <el-button
               v-if="historyList.length > 0"
@@ -46,14 +46,14 @@
               type="danger"
               @click="clearHistory"
             >
-              清空
+              {{ t('clear') }}
             </el-button>
           </div>
 
           <!-- History List -->
           <div class="sidebar-history">
             <div v-if="historyList.length === 0" class="sidebar-empty">
-              暂无历史记录
+              {{ t('sidebarEmpty') }}
             </div>
             <div
               v-for="(item, index) in historyList"
@@ -146,11 +146,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, provide, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import zhCn from 'element-plus/dist/locale/zh-cn.mjs'
 import en from 'element-plus/dist/locale/en.mjs'
 import { Connection, Fold, Expand, Clock, Document } from '@element-plus/icons-vue'
+import { LANG_SYMBOL, createLocale, messages } from './utils/i18n'
 import ResearchInput from './components/ResearchInput.vue'
 import ProgressPanel from './components/ProgressPanel.vue'
 import ReportPanel from './components/ReportPanel.vue'
@@ -172,6 +173,13 @@ const currentLocale = computed(() => currentLang.value === 'en' ? en : zhCn)
 
 // Apply theme on init
 document.documentElement.classList.toggle('dark', currentTheme.value === 'dark')
+
+// Provide i18n locale to all descendants
+const currentLocaleMessages = createLocale(currentLang)
+provide(LANG_SYMBOL, currentLocaleMessages)
+
+// t() for App.vue template (can't use useI18n since we're the provider)
+const t = (key) => (messages[currentLang.value] || messages.zh)[key] || key
 
 function setTheme(t) {
   currentTheme.value = t
@@ -217,11 +225,19 @@ function onSettingsChange({ provider }) {
 }
 
 const progressStages = reactive([
-  { key: 'research',   label: '信息搜索',   done: false, active: false },
-  { key: 'writing',    label: '报告撰写',   done: false, active: false },
-  { key: 'fact_check', label: '事实核查',   done: false, active: false },
-  { key: 'complete',   label: '生成完成',   done: false, active: false },
+  { key: 'research',   label: '', done: false, active: false },
+  { key: 'writing',    label: '', done: false, active: false },
+  { key: 'fact_check', label: '', done: false, active: false },
+  { key: 'complete',   label: '', done: false, active: false },
 ])
+
+// Keep stage labels in sync with current language
+function updateStageLabels() {
+  const labels = [t('stageResearch'), t('stageWriting'), t('stageFactCheck'), t('stageComplete')]
+  progressStages.forEach((s, i) => { s.label = labels[i] })
+}
+updateStageLabels()
+watch(currentLang, updateStageLabels)
 
 onMounted(async () => {
   await checkHealth()
@@ -467,18 +483,18 @@ function handleClear() {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #f5f7fa;
+  background: var(--el-bg-color-page);
   overflow: hidden;
 }
 
 /* ── Header ── */
 .app-header {
-  background: #fff;
-  color: #303133;
+  background: var(--el-bg-color);
+  color: var(--el-text-color-primary);
   display: flex;
   align-items: center;
   padding: 0 16px;
-  border-bottom: 1px solid #e4e7ed;
+  border-bottom: 1px solid var(--el-border-color-light);
   box-shadow: 0 1px 4px rgba(0,0,0,.04);
   z-index: 100;
   position: relative;
@@ -501,7 +517,7 @@ function handleClear() {
   background: none;
   border: none;
   cursor: pointer;
-  color: #606266;
+  color: var(--el-text-color-secondary);
   padding: 4px;
   border-radius: 6px;
   display: flex;
@@ -511,11 +527,11 @@ function handleClear() {
 }
 
 .sidebar-toggle:hover {
-  background: #f0f2f5;
+  background: var(--el-fill-color-light);
 }
 
 .header-icon {
-  color: #409eff;
+  color: var(--el-color-primary);
 }
 
 .header-text {
@@ -529,12 +545,12 @@ function handleClear() {
   font-weight: 700;
   margin: 0;
   line-height: 1.2;
-  color: #303133;
+  color: var(--el-text-color-primary);
 }
 
 .app-subtitle {
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 
 /* ── Body (sidebar + main) ── */
@@ -546,8 +562,8 @@ function handleClear() {
 
 /* ── Sidebar ── */
 .app-sidebar {
-  background: #fff;
-  border-right: 1px solid #e4e7ed;
+  background: var(--el-bg-color);
+  border-right: 1px solid var(--el-border-color-light);
   transition: width .25s ease;
   overflow: hidden;
   display: flex;
@@ -567,7 +583,7 @@ function handleClear() {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px 10px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
   flex-shrink: 0;
 }
 
@@ -577,7 +593,7 @@ function handleClear() {
   gap: 6px;
   font-size: 14px;
   font-weight: 600;
-  color: #303133;
+  color: var(--el-text-color-primary);
 }
 
 .sidebar-history {
@@ -588,7 +604,7 @@ function handleClear() {
 
 .sidebar-empty {
   text-align: center;
-  color: #c0c4cc;
+  color: var(--el-text-color-placeholder);
   font-size: 13px;
   padding: 32px 0;
 }
@@ -605,16 +621,16 @@ function handleClear() {
 }
 
 .sidebar-history .history-item:hover {
-  background: #f5f7fa;
+  background: var(--el-fill-color-light);
 }
 
 .sidebar-history .history-item.active {
-  background: #ecf5ff;
+  background: var(--el-color-primary-light-9);
 }
 
 .history-item-icon {
   flex-shrink: 0;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   margin-top: 2px;
 }
 
@@ -628,7 +644,7 @@ function handleClear() {
 
 .history-item-title {
   font-size: 13px;
-  color: #303133;
+  color: var(--el-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -637,11 +653,11 @@ function handleClear() {
 
 .history-item-time {
   font-size: 11px;
-  color: #c0c4cc;
+  color: var(--el-text-color-placeholder);
 }
 
 .sidebar-bottom {
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--el-border-color-lighter);
   padding: 10px 12px;
   flex-shrink: 0;
   display: flex;
@@ -678,6 +694,6 @@ function handleClear() {
   color: var(--el-text-color-secondary);
   font-size: 12px;
   border-top: 1px solid var(--el-border-color-light);
-  background: #fff;
+  background: var(--el-bg-color);
 }
 </style>

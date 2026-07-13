@@ -40,6 +40,20 @@
       class="main-progress"
     />
 
+    <!-- Cancel Button -->
+    <div v-if="showCancel" class="cancel-row">
+      <el-button
+        type="danger"
+        size="small"
+        plain
+        :icon="Close"
+        @click="$emit('cancel')"
+        :disabled="!showCancel"
+      >
+        取消研究
+      </el-button>
+    </div>
+
     <!-- Event Log -->
     <div class="log-container" ref="logContainer">
       <div
@@ -57,7 +71,7 @@
 
 <script setup>
 import { computed, ref, watch, nextTick } from 'vue'
-import { DataAnalysis, CircleCheckFilled, Loading, CircleCheck } from '@element-plus/icons-vue'
+import { DataAnalysis, CircleCheckFilled, Loading, CircleCheck, Close } from '@element-plus/icons-vue'
 
 const props = defineProps({
   progressStages: {
@@ -72,7 +86,13 @@ const props = defineProps({
     type: String,
     default: 'idle',
   },
+  showCancel: {
+    type: Boolean,
+    default: false,
+  },
 })
+
+const emit = defineEmits(['cancel'])
 
 const logContainer = ref(null)
 
@@ -205,6 +225,12 @@ watch(
 }
 
 .main-progress {
+  margin-bottom: 16px;
+}
+
+/* Cancel button */
+.cancel-row {
+  text-align: center;
   margin-bottom: 16px;
 }
 

@@ -37,6 +37,8 @@
           :progress-stages="progressStages"
           :progress-log="progressLog"
           :current-stage="currentStage"
+          :show-cancel="isResearching"
+          @cancel="handleCancel"
         />
 
         <!-- Error Alert -->
@@ -57,7 +59,36 @@
           :search-results="searchResults"
           @clear="handleClear"
         />
-      </div>
+
+        <!-- Research History -->
+        <el-card v-if="historyList.length > 0" class="history-card" shadow="hover">
+          <div class="card-header">
+            <h3 class="card-title">
+              <el-icon :size="18"><Clock /></el-icon>
+              历史记录
+            </h3>
+            <el-button size="small" text type="danger" @click="clearHistory">
+              清除历史
+            </el-button>
+          </div>
+          <el-timeline>
+            <el-timeline-item
+              v-for="(item, index) in historyList"
+              :key="index"
+              :timestamp="item.time"
+              placement="top"
+            >
+              <div class="history-item" @click="restoreHistory(item)">
+                <el-link type="primary" :underline="false">
+                  {{ item.topic }}
+                </el-link>
+                <span v-if="reportContent && reportContent === item.report" class="history-current-badge">
+                  <el-tag size="small" type="success">当前</el-tag>
+                </span>
+              </div>
+            </el-timeline-item>
+          </el-timeline>
+        </el-card>
     </el-main>
 
     <!-- Footer -->
@@ -69,10 +100,12 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
-import { Connection } from '@element-plus/icons-vue'
+import { Connection, Clock } from '@element-plus/icons-vue'
 import ResearchInput from './components/ResearchInput.vue'
 import ProgressPanel from './components/ProgressPanel.vue'
 import ReportPanel from './components/ReportPanel.vue'
+
+const HISTORY_KEY = 'collab-agent-history'
 
 const isResearching = ref(false)
 const errorMessage = ref('')
@@ -81,6 +114,9 @@ const searchResults = ref([])
 const progressLog = ref([])
 const currentStage = ref('idle')
 const backendStatus = ref('checking')
+const currentTaskId = ref('')
+const eventSourceRef = ref(null)
+const historyList = ref([])
 
 const progressStages = reactive([
   { key: 'research', label: '信息搜索', icon: 'Search', done: false, active: false },
@@ -90,7 +126,46 @@ const progressStages = reactive([
 
 onMounted(async () => {
   await checkHealth()
+  loadHistory()
 })
+
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY)
+    historyList.value = raw ? JSON.parse(raw) : []
+  } catch {
+    historyList.value = []
+  }
+}
+
+function saveToHistory(topic, report, results) {
+  const entry = {
+    topic,
+    report,
+    searchResults: results,
+    time: new Date().toLocaleString('zh-CN'),
+  }
+  const list = [entry, ...historyList.value.filter(h => h.topic !== topic)].slice(0, 20)
+  historyList.value = list
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(list))
+  } catch {
+    // localStorage full, ignore
+  }
+}
+
+function restoreHistory(item) {
+  reportContent.value = item.report
+  searchResults.value = item.searchResults || []
+  errorMessage.value = ''
+  progressLog.value = []
+  resetStages()
+}
+
+function clearHistory() {
+  historyList.value = []
+  localStorage.removeItem(HISTORY_KEY)
+}
 
 async function checkHealth() {
   try {
@@ -120,6 +195,29 @@ function addLog(message, type = 'info') {
   })
 }
 
+function handleCancel() {
+  if (!currentTaskId.value) {
+    // No task ID, just close
+    if (eventSourceRef.value) {
+      eventSourceRef.value.close()
+    }
+    isResearching.value = false
+    addLog('⏹ 研究任务已取消', 'info')
+    return
+  }
+
+  addLog('⏹ 正在取消研究任务...', 'info')
+  fetch(`/research/stream/${currentTaskId.value}`, { method: 'DELETE' })
+    .catch(() => {})
+    .finally(() => {
+      if (eventSourceRef.value) {
+        eventSourceRef.value.close()
+      }
+      isResearching.value = false
+      addLog('⏹ 研究任务已取消', 'info')
+    })
+}
+
 function handleSubmit(topic) {
   if (!topic.trim()) return
 
@@ -127,6 +225,7 @@ function handleSubmit(topic) {
   errorMessage.value = ''
   reportContent.value = ''
   searchResults.value = []
+  currentTaskId.value = ''
   resetStages()
 
   addLog(`开始研究主题: "${topic}"`, 'info')
@@ -136,14 +235,22 @@ function handleSubmit(topic) {
   const eventSource = new EventSource(
     `/research/stream?topic=${encodeURIComponent(topic)}`
   )
+  eventSourceRef.value = eventSource
 
   eventSource.addEventListener('progress', (e) => {
     const data = JSON.parse(e.data)
-    const { stage, message } = data
+    const { stage, message, task_id } = data
+
+    // Save task_id for cancellation (from "starting" stage)
+    if (task_id) {
+      currentTaskId.value = task_id
+    }
 
     addLog(message, 'progress')
 
-    if (stage === 'research') {
+    if (stage === 'starting') {
+      // Just log, no stage change
+    } else if (stage === 'research') {
       currentStage.value = 'research'
       progressStages[0].active = true
       progressStages[0].done = false
@@ -176,15 +283,17 @@ function handleSubmit(topic) {
     addLog('✅ 研究报告生成完成！', 'success')
     isResearching.value = false
     eventSource.close()
+    eventSourceRef.value = null
+
+    // Save to history
+    saveToHistory(topic, data.report, data.search_results || [])
   })
 
   eventSource.addEventListener('error', (e) => {
-    // Try to parse error message if available
     try {
       const data = JSON.parse((e.data || '{}'))
       errorMessage.value = data.message || '研究过程发生错误，请重试'
     } catch {
-      // If EventSource itself errors (connection issue)
       if (eventSource.readyState === EventSource.CLOSED) {
         errorMessage.value = '连接中断，请检查后端服务是否运行'
       } else {
@@ -194,6 +303,7 @@ function handleSubmit(topic) {
     addLog(`❌ ${errorMessage.value}`, 'error')
     isResearching.value = false
     eventSource.close()
+    eventSourceRef.value = null
   })
 }
 
@@ -285,5 +395,38 @@ function handleClear() {
   color: var(--el-text-color-secondary);
   font-size: 13px;
   border-top: 1px solid var(--el-border-color-light);
+}
+
+/* History card */
+.history-card {
+  border-radius: 12px;
+}
+
+.history-card .card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.history-card .card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.history-item {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.history-item:hover {
+  opacity: 0.8;
 }
 </style>

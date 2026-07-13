@@ -20,6 +20,28 @@
     <!-- Collapsible body -->
     <el-collapse-transition>
       <div v-show="expanded" class="settings-body">
+
+        <!-- ── General Preferences ── -->
+        <div class="prefs-section">
+          <div class="pref-row">
+            <span class="pref-label">主题</span>
+            <el-radio-group :model-value="theme" size="small" @change="$emit('update:theme', $event)">
+              <el-radio-button value="light">☀️ 浅色</el-radio-button>
+              <el-radio-button value="dark">🌙 深色</el-radio-button>
+            </el-radio-group>
+          </div>
+          <div class="pref-row">
+            <span class="pref-label">语言</span>
+            <el-radio-group :model-value="lang" size="small" @change="$emit('update:lang', $event)">
+              <el-radio-button value="zh">中文</el-radio-button>
+              <el-radio-button value="en">English</el-radio-button>
+            </el-radio-group>
+          </div>
+        </div>
+
+        <el-divider style="margin:8px 0" />
+
+        <!-- ── Provider Section ── -->
         <div v-if="providers.length === 0" class="empty-hint">
           <el-empty description="暂未配置供应商" :image-size="60">
             <el-button type="primary" size="small" @click="openAddDialog">添加供应商</el-button>
@@ -104,7 +126,11 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { Setting, ArrowDown, Plus, Edit, Delete } from '@element-plus/icons-vue'
 
-const emit = defineEmits(['change'])
+const props = defineProps({
+  theme: { type: String, default: 'light' },
+  lang: { type: String, default: 'zh' },
+})
+const emit = defineEmits(['change', 'update:theme', 'update:lang'])
 
 const expanded = ref(false)
 const providers = ref([])
@@ -287,6 +313,27 @@ defineExpose({
 
 .settings-body {
   padding: 8px 8px 0;
+}
+
+.prefs-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.pref-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pref-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #606266;
+  white-space: nowrap;
 }
 
 .empty-hint {

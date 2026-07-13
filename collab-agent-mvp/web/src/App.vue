@@ -1,4 +1,5 @@
 <template>
+  <el-config-provider :locale="currentLocale">
   <el-container class="app-container">
     <!-- Header -->
     <el-header class="app-header" height="56px">
@@ -75,7 +76,11 @@
           <div class="sidebar-bottom">
             <SettingsPanel
               ref="settingsRef"
+              :theme="currentTheme"
+              :lang="currentLang"
               @change="onSettingsChange"
+              @update:theme="setTheme"
+              @update:lang="setLang"
             />
             <KnowledgePanel />
           </div>
@@ -137,11 +142,14 @@
       <span>CollabAgent MVP v2.0 &copy; 2026</span>
     </el-footer>
   </el-container>
+  </el-config-provider>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessageBox } from 'element-plus'
+import zhCn from 'element-plus/dist/locale/zh-cn.mjs'
+import en from 'element-plus/dist/locale/en.mjs'
 import { Connection, Fold, Expand, Clock, Document } from '@element-plus/icons-vue'
 import ResearchInput from './components/ResearchInput.vue'
 import ProgressPanel from './components/ProgressPanel.vue'
@@ -154,6 +162,28 @@ const HISTORY_KEY = 'collab-agent-history'
 
 const sidebarOpen = ref(true)
 const isResearching = ref(false)
+
+// Theme & Language (sync with localStorage)
+const THEME_KEY = 'collab-agent-theme'
+const LANG_KEY = 'collab-agent-lang'
+const currentTheme = ref(localStorage.getItem(THEME_KEY) || 'light')
+const currentLang = ref(localStorage.getItem(LANG_KEY) || 'zh')
+const currentLocale = computed(() => currentLang.value === 'en' ? en : zhCn)
+
+// Apply theme on init
+document.documentElement.classList.toggle('dark', currentTheme.value === 'dark')
+
+function setTheme(t) {
+  currentTheme.value = t
+  localStorage.setItem(THEME_KEY, t)
+  document.documentElement.classList.toggle('dark', t === 'dark')
+}
+
+function setLang(l) {
+  currentLang.value = l
+  localStorage.setItem(LANG_KEY, l)
+  document.documentElement.lang = l
+}
 const errorMessage = ref('')
 const reportContent = ref('')
 const searchResults = ref([])
@@ -434,10 +464,11 @@ function handleClear() {
 <style scoped>
 /* ── Root ── */
 .app-container {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   background: #f5f7fa;
+  overflow: hidden;
 }
 
 /* ── Header ── */

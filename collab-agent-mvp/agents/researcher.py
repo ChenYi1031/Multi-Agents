@@ -2,6 +2,7 @@
 搜索研究员 Agent 节点
 根据用户主题，使用 LLM + 搜索工具收集信息，返回结构化 JSON 结果
 正确处理 LLM 工具调用（function calling）循环
+支持异步执行
 """
 
 from __future__ import annotations
@@ -188,9 +189,60 @@ def _run_tool_loop(llm: ChatOpenAI, llm_with_tools, messages: list) -> AIMessage
     return final_response
 
 
-def researcher_node(state: dict) -> dict:
+async def _run_tool_loop_async(llm: ChatOpenAI, llm_with_tools, messages: list) -> AIMessage:
     """
-    研究员节点：分析主题 → 搜索信息 → 返回结构化结果
+    异步工具调用循环：
+    1. 调用 LLM（带工具）
+    2. 如果有 tool_calls，逐个执行并注入结果
+    3. 重复直到 LLM 返回纯文本内容
+    4. 5 轮超限后，用不带工具的 LLM 强制输出 JSON
+    """
+    for attempt in range(5):
+        response: AIMessage = await llm_with_tools.ainvoke(messages)
+
+        logger.debug(f"[async attempt {attempt}] response type: {type(response).__name__}")
+        logger.debug(f"[async attempt {attempt}] content: {response.content[:200] if response.content else '(empty)'}")
+        logger.debug(f"[async attempt {attempt}] tool_calls: {getattr(response, 'tool_calls', None)}")
+
+        if not hasattr(response, "tool_calls") or not response.tool_calls:
+            logger.info(f"异步工具调用循环在 {attempt+1} 轮完成")
+            return response
+
+        messages.append(response)
+        for tc in response.tool_calls:
+            if isinstance(tc, dict):
+                tool_name = tc.get("name", tc.get("function", {}).get("name", ""))
+                tool_args = tc.get("args", tc.get("function", {}).get("arguments", {}))
+                tool_call_id = tc.get("id", tc.get("function", {}).get("call_id", ""))
+            else:
+                tool_name = getattr(tc, "name", "")
+                tool_args = getattr(tc, "args", {})
+                tool_call_id = getattr(tc, "id", "")
+
+            if tool_name == "search_tool":
+                query = tool_args.get("query", "")
+                logger.info(f"执行搜索工具 (async): {query}")
+                result = search(query)
+                result_str = json.dumps(result, ensure_ascii=False, indent=2)
+                messages.append(ToolMessage(content=result_str, tool_call_id=tool_call_id))
+            else:
+                logger.warning(f"未知工具调用: {tool_name}")
+                messages.append(ToolMessage(
+                    content=json.dumps({"error": f"未知工具: {tool_name}"}),
+                    tool_call_id=tool_call_id,
+                ))
+
+    logger.warning("异步工具调用循环达到最大次数，强制 LLM 输出 JSON")
+    messages.append(SystemMessage(
+        content="你已用完工具调用次数。请基于已有信息，直接输出 JSON 数组结果，不要调用任何工具。"
+    ))
+    final_response: AIMessage = await llm.ainvoke(messages)
+    return final_response
+
+
+async def researcher_node(state: dict) -> dict:
+    """
+    异步研究员节点：分析主题 → 搜索信息 → 返回结构化结果
     正确处理 LLM function calling 循环
     """
     topic = state.get("topic", "")
@@ -213,9 +265,8 @@ def researcher_node(state: dict) -> dict:
             SystemMessage(content=RESEARCHER_PROMPT),
             HumanMessage(content=f"研究主题：{topic}"),
         ]
-        response = _run_tool_loop(llm, llm_with_tools, messages)
+        response = await _run_tool_loop_async(llm, llm_with_tools, messages)
         search_results = _parse_json_from_response(response.content)
-        # 去重
         return {"search_results": deduplicate_results(search_results)}
     except Exception as e:
         logger.warning(f"第一次 JSON 解析失败，重试: {e}")
@@ -227,7 +278,7 @@ def researcher_node(state: dict) -> dict:
             HumanMessage(content=f"研究主题：{topic}"),
             SystemMessage(content="请确保输出严格的 JSON 数组格式，不要包含额外的文字说明。"),
         ]
-        response = _run_tool_loop(llm, llm_with_tools, messages)
+        response = await _run_tool_loop_async(llm, llm_with_tools, messages)
         search_results = _parse_json_from_response(response.content)
         return {"search_results": deduplicate_results(search_results)}
     except Exception as e:
@@ -242,7 +293,8 @@ def researcher_node(state: dict) -> dict:
         except Exception as e2:
             logger.error(f"兜底搜索也失败: {e2}")
 
-        # 搜索失败：返回空列表，但不设 error
-        # writer 节点会基于 LLM 自身知识生成报告
         logger.warning("所有搜索方式均失败，返回空结果（writer 将基于 LLM 知识生成）")
         return {"search_results": []}
+
+
+

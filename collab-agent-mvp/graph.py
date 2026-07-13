@@ -12,7 +12,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from agents.researcher import researcher_node
-from agents.writer import writer_node
+from agents.writer import writer_node, writer_node_sync
 
 logger = logging.getLogger(__name__)
 
@@ -53,4 +53,6 @@ def create_graph() -> StateGraph:
 
 
 # 编译好的图实例，供 api.py 导入使用
+# 注意: researcher_node 和 writer_node 均为 async 函数，
+# 调用时须使用 compiled_graph.ainvoke() 而非 .invoke()
 compiled_graph = create_graph()

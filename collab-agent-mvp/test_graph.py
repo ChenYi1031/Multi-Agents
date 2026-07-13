@@ -1,10 +1,12 @@
 """
 CollabAgent MVP - 离线测试脚本
 不启动 FastAPI 服务，直接调用 LangGraph 图进行端到端测试
+使用异步 ainvoke 调用
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from graph import compiled_graph
@@ -15,7 +17,7 @@ logging.basicConfig(
 )
 
 
-def main():
+async def main():
     """运行一次端到端测试"""
     topic = "量子计算最新进展"
     print(f"开始研究主题: {topic}")
@@ -29,7 +31,7 @@ def main():
         "error": "",
     }
 
-    result = compiled_graph.invoke(
+    result = await compiled_graph.ainvoke(
         initial_state,
         config={"configurable": {"thread_id": "test1"}},
     )
@@ -56,4 +58,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -1,7 +1,8 @@
 """
 报告撰写员 Agent 节点
 基于搜索结果，生成结构化的 Markdown 格式研究报告
-含质量校验 + 自动修复机制
+含质量校验 + 自动修复机制 + 截断检测续写
+支持异步执行
 """
 
 from __future__ import annotations
@@ -108,8 +109,14 @@ def _build_prompt(topic: str, research_text: str, fix_instruction: str = "") -> 
 
 
 def _generate_report(llm, prompt: str) -> str:
-    """调用 LLM 生成报告，返回内容"""
+    """调用 LLM 生成报告，返回内容 (同步)"""
     response = llm.invoke(prompt)
+    return response.content
+
+
+async def _generate_report_async(llm, prompt: str) -> str:
+    """调用 LLM 生成报告，返回内容 (异步)"""
+    response = await llm.ainvoke(prompt)
     return response.content
 
 
@@ -153,8 +160,7 @@ def _is_truncated(report: str) -> bool:
 
 def _continue_report(llm, report: str, topic: str, results_text: str) -> str:
     """
-    续写被截断的报告。
-    将已有报告发给 LLM，要求从断点继续。
+    续写被截断的报告 (同步)。
     """
     prompt = f"""你是一位资深报告撰写员。以下是一份关于"{topic}"的报告，但被截断了。
 请从断点处**继续往下写**，不要重复已有内容，直接续写缺失的部分。
@@ -173,8 +179,6 @@ def _continue_report(llm, report: str, topic: str, results_text: str) -> str:
     try:
         response = llm.invoke(prompt)
         continuation = response.content.strip()
-        # 去重：如果 LLM 重复了已有内容，截断
-        # 取已有报告的最后 50 个字符作为锚点
         anchor = report[-50:].strip()
         if anchor and anchor in continuation:
             idx = continuation.index(anchor) + len(anchor)
@@ -187,14 +191,48 @@ def _continue_report(llm, report: str, topic: str, results_text: str) -> str:
         return report
 
 
+async def _continue_report_async(llm, report: str, topic: str, results_text: str) -> str:
+    """
+    续写被截断的报告 (异步)。
+    将已有报告发给 LLM，要求从断点继续。
+    """
+    prompt = f"""你是一位资深报告撰写员。以下是一份关于"{topic}"的报告，但被截断了。
+请从断点处**继续往下写**，不要重复已有内容，直接续写缺失的部分。
+
+已有报告内容：
+{report}
+
+--- 请从这里继续写 ---
+
+要求：
+- 直接从断点处续写，不要重复标题或已有内容。
+- 保持原有的 Markdown 格式和语言风格。
+- 如有搜索源，请继续引用 [来源名称](URL)。
+- 务必包含结论或展望章节作为结尾。
+"""
+    try:
+        response = await llm.ainvoke(prompt)
+        continuation = response.content.strip()
+        anchor = report[-50:].strip()
+        if anchor and anchor in continuation:
+            idx = continuation.index(anchor) + len(anchor)
+            continuation = continuation[idx:].strip()
+        combined = report.rstrip() + "\n\n" + continuation
+        logger.info(f"报告续写异步完成，原长度={len(report)}，续写后={len(combined)}")
+        return combined
+    except Exception as e:
+        logger.warning(f"报告续写异步失败: {e}")
+        return report
+
+
 # ──────────────────────────────────────────────
 # Writer 节点
 # ──────────────────────────────────────────────
 
 
-def writer_node(state: dict) -> dict:
+async def writer_node(state: dict) -> dict:
     """
-    撰写员节点：基于搜索结果生成 Markdown 报告
+    异步撰写员节点：基于搜索结果生成 Markdown 报告
     内置质量校验，不合格时自动修复一轮
 
     Args:
@@ -206,7 +244,6 @@ def writer_node(state: dict) -> dict:
     topic = state.get("topic", "")
     results = state.get("search_results", [])
 
-    # 如果有错误且无搜索结果，直接返回错误
     if state.get("error") and not results:
         return {
             "draft_report": "",
@@ -214,19 +251,17 @@ def writer_node(state: dict) -> dict:
             "error": state["error"],
         }
 
-    # 序列化搜索结果
     research_text = json.dumps(results, indent=2, ensure_ascii=False)
 
-    # 如果搜索结果为空，给出提示
     if not results:
         research_text = "未找到相关搜索结果，请基于你的知识生成报告。"
 
     llm = _build_llm(temperature=0.7)
 
-    # ── 生成 ──
+    # ── 异步生成 ──
     try:
         prompt = _build_prompt(topic, research_text)
-        draft = _generate_report(llm, prompt)
+        draft = await _generate_report_async(llm, prompt)
     except Exception as e:
         logger.error(f"报告生成失败: {e}")
         return {
@@ -240,7 +275,6 @@ def writer_node(state: dict) -> dict:
     if not issues:
         logger.info("报告质量校验通过")
     else:
-        # ── 修复一轮 ──
         logger.warning(f"报告质量校验未通过 ({len(issues)} 项)，尝试修复: {issues}")
         fix_instruction = (
             "你上次生成的报告存在以下问题，请修正后重新输出：\n"
@@ -249,7 +283,7 @@ def writer_node(state: dict) -> dict:
         )
         try:
             prompt = _build_prompt(topic, research_text, fix_instruction)
-            draft = _generate_report(llm, prompt)
+            draft = await _generate_report_async(llm, prompt)
             logger.info("报告修复完成")
         except Exception as e:
             logger.error(f"报告修复失败，使用原始版本: {e}")
@@ -257,6 +291,13 @@ def writer_node(state: dict) -> dict:
     # ── 截断检测与续写 ──
     if _is_truncated(draft):
         logger.warning("检测到报告可能被截断，尝试续写")
-        draft = _continue_report(llm, draft, topic, research_text)
+        draft = await _continue_report_async(llm, draft, topic, research_text)
 
     return {"draft_report": draft, "final_report": draft}
+
+
+# ── 同步别名 (用于 LangGraph invoke 兼容) ──
+def writer_node_sync(state: dict) -> dict:
+    """同步版本的 writer_node，用于 LangGraph invoke"""
+    import asyncio
+    return asyncio.run(writer_node(state))

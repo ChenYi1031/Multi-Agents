@@ -56,29 +56,62 @@
       </div>
     </div>
 
-    <!-- Per-call detail table -->
+    <!-- Per-call detail cards -->
     <div v-if="calls.length > 0" class="token-detail">
       <el-divider />
-      <h4 class="breakdown-title">调用明细</h4>
-      <el-table :data="calls" size="small" stripe max-height="240">
-        <el-table-column label="Agent" prop="agent" width="80" />
-        <el-table-column label="输入" prop="input_tokens" width="80" align="right" />
-        <el-table-column label="输出" prop="output_tokens" width="80" align="right" />
-        <el-table-column label="总计" prop="total_tokens" width="80" align="right" />
-        <el-table-column label="耗时(ms)" prop="duration_ms" width="90" align="right" />
-        <el-table-column label="费用" prop="cost" width="80" align="right">
-          <template #default="{ row }">
-            ¥{{ row.cost.toFixed(6) }}
-          </template>
-        </el-table-column>
-      </el-table>
+      <div class="detail-header">
+        <h4 class="breakdown-title">调用明细</h4>
+        <span class="detail-count">{{ calls.length }} 次</span>
+      </div>
+      <div class="call-list">
+        <div
+          v-for="(call, idx) in calls"
+          :key="idx"
+          class="call-item"
+          :class="'call-agent-' + (call.agent || 'unknown')"
+        >
+          <div class="call-top">
+            <span class="call-agent-tag">{{ AGENT_LABELS[call.agent] || call.agent }}</span>
+            <span class="call-cost">¥{{ call.cost.toFixed(6) }}</span>
+          </div>
+          <div class="call-bars">
+            <div class="call-bar-group">
+              <span class="call-bar-label">输入</span>
+              <div class="call-bar-track">
+                <div
+                  class="call-bar-fill input-fill"
+                  :style="{ width: barPercent(call.input_tokens, call.total_tokens) + '%' }"
+                />
+              </div>
+              <span class="call-bar-val">{{ call.input_tokens.toLocaleString() }}</span>
+            </div>
+            <div class="call-bar-group">
+              <span class="call-bar-label">输出</span>
+              <div class="call-bar-track">
+                <div
+                  class="call-bar-fill output-fill"
+                  :style="{ width: barPercent(call.output_tokens, call.total_tokens) + '%' }"
+                />
+              </div>
+              <span class="call-bar-val">{{ call.output_tokens.toLocaleString() }}</span>
+            </div>
+          </div>
+          <div class="call-meta">
+            <span class="call-meta-item">
+              <el-icon :size="12"><Timer /></el-icon>
+              {{ call.duration_ms.toFixed(0) }}ms
+            </span>
+            <span class="call-meta-item">{{ call.total_tokens.toLocaleString() }} tokens</span>
+          </div>
+        </div>
+      </div>
     </div>
   </el-card>
 </template>
 
 <script setup>
 import { computed } from 'vue'
-import { DataAnalysis, ArrowRight } from '@element-plus/icons-vue'
+import { DataAnalysis, ArrowRight, Timer } from '@element-plus/icons-vue'
 
 const props = defineProps({
   tokenUsage: {
@@ -141,6 +174,11 @@ function buildBreakdownFromCalls() {
   const arr = Object.values(groups)
   const total = arr.reduce((s, a) => s + a.total_tokens, 0) || 1
   return arr.map((a) => ({ ...a, percentage: Math.round((a.total_tokens / total) * 100) }))
+}
+
+function barPercent(part, total) {
+  if (!total) return 0
+  return Math.max(4, (part / total) * 100)
 }
 
 function formatNumber(n) {
@@ -271,5 +309,132 @@ function formatNumber(n) {
 
 :deep(.el-divider) {
   margin: 12px 0;
+}
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.detail-count {
+  font-size: 12px;
+  color: #909399;
+}
+
+.call-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.call-item {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 10px 12px;
+  border-left: 3px solid #dcdfe6;
+  transition: background 0.15s;
+}
+
+.call-item:hover {
+  background: #f0f2f5;
+}
+
+.call-item.call-agent-researcher {
+  border-left-color: #409eff;
+}
+
+.call-item.call-agent-writer {
+  border-left-color: #67c23a;
+}
+
+.call-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.call-agent-tag {
+  font-size: 12px;
+  font-weight: 600;
+  color: #303133;
+  background: #e8eaed;
+  padding: 1px 8px;
+  border-radius: 4px;
+}
+
+.call-cost {
+  font-size: 12px;
+  color: #e6a23c;
+  font-weight: 500;
+}
+
+.call-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.call-bar-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.call-bar-label {
+  font-size: 11px;
+  color: #909399;
+  width: 20px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.call-bar-track {
+  flex: 1;
+  height: 6px;
+  background: #e8eaed;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.call-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  min-width: 4px;
+  transition: width 0.3s ease;
+}
+
+.input-fill {
+  background: linear-gradient(90deg, #409eff, #79bbff);
+}
+
+.output-fill {
+  background: linear-gradient(90deg, #67c23a, #95d475);
+}
+
+.call-bar-val {
+  font-size: 11px;
+  color: #606266;
+  width: 50px;
+  text-align: right;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.call-meta {
+  display: flex;
+  gap: 16px;
+  margin-top: 4px;
+}
+
+.call-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: #909399;
 }
 </style>

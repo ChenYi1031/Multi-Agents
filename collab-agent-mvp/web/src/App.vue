@@ -1,13 +1,19 @@
 <template>
   <el-container class="app-container">
     <!-- Header -->
-    <el-header class="app-header" height="64px">
+    <el-header class="app-header" height="56px">
       <div class="header-content">
         <div class="header-left">
-          <el-icon :size="28" class="header-icon"><Connection /></el-icon>
+          <button class="sidebar-toggle" @click="sidebarOpen = !sidebarOpen">
+            <el-icon :size="20">
+              <Fold v-if="sidebarOpen" />
+              <Expand v-else />
+            </el-icon>
+          </button>
+          <el-icon :size="24" class="header-icon"><Connection /></el-icon>
           <div class="header-text">
-            <h1 class="app-title">CollabAgent MVP</h1>
-            <span class="app-subtitle">多 Agent 协作研究报告生成系统</span>
+            <h1 class="app-title">CollabAgent</h1>
+            <span class="app-subtitle">研究报告</span>
           </div>
         </div>
         <div class="header-right">
@@ -22,98 +28,112 @@
       </div>
     </el-header>
 
-    <!-- Main Content -->
-    <el-main class="app-main">
-      <div class="content-wrapper">
-        <!-- Settings Panel (模型供应商管理) -->
-        <SettingsPanel
-          ref="settingsRef"
-          @change="onSettingsChange"
-        />
-
-        <!-- Knowledge Base (RAG) -->
-        <KnowledgePanel />
-
-        <!-- Research Input -->
-        <ResearchInput
-          :loading="isResearching"
-          @submit="handleSubmit"
-        />
-
-        <!-- Progress Panel (圆形进度 + 运行日志) -->
-        <ProgressPanel
-          v-if="isResearching || progressLog.length > 0"
-          :progress-stages="progressStages"
-          :progress-log="progressLog"
-          :current-stage="currentStage"
-          :show-cancel="isResearching"
-          @cancel="handleCancel"
-        />
-
-        <!-- Token Usage Panel -->
-        <TokenUsagePanel
-          v-if="tokenUsage"
-          :token-usage="tokenUsage"
-        />
-
-        <!-- Error Alert -->
-        <el-alert
-          v-if="errorMessage"
-          :title="errorMessage"
-          type="error"
-          show-icon
-          :closable="true"
-          @close="errorMessage = ''"
-          class="error-alert"
-        />
-
-        <!-- Report Display -->
-        <ReportPanel
-          v-if="reportContent"
-          :report="reportContent"
-          :search-results="searchResults"
-          :fact-check="factCheckData"
-          :topic="lastTopic"
-          :model-name="modelName"
-          :search-source="searchSource"
-          @clear="handleClear"
-          @followup="handleFollowUp"
-        />
-
-        <!-- Research History -->
-        <el-card v-if="historyList.length > 0" class="history-card" shadow="hover">
-          <div class="card-header">
-            <h3 class="card-title">
-              <el-icon :size="18"><Clock /></el-icon>
-              历史记录
-            </h3>
-            <el-button size="small" text type="danger" @click="clearHistory">
-              清除历史
+    <el-container class="body-container">
+      <!-- Sidebar -->
+      <el-aside :width="sidebarOpen ? '280px' : '0px'" class="app-sidebar">
+        <div v-show="sidebarOpen" class="sidebar-inner">
+          <!-- Sidebar Header -->
+          <div class="sidebar-header">
+            <div class="sidebar-header-title">
+              <el-icon :size="16"><Clock /></el-icon>
+              <span>历史记录</span>
+            </div>
+            <el-button
+              v-if="historyList.length > 0"
+              size="small"
+              text
+              type="danger"
+              @click="clearHistory"
+            >
+              清空
             </el-button>
           </div>
-          <el-timeline>
-            <el-timeline-item
+
+          <!-- History List -->
+          <div class="sidebar-history">
+            <div v-if="historyList.length === 0" class="sidebar-empty">
+              暂无历史记录
+            </div>
+            <div
               v-for="(item, index) in historyList"
               :key="index"
-              :timestamp="item.time"
-              placement="top"
+              class="history-item"
+              :class="{ active: reportContent === item.report }"
+              @click="restoreHistory(item)"
             >
-              <div class="history-item" @click="restoreHistory(item)">
-                <el-link type="primary" :underline="false">
-                  {{ item.topic }}
-                </el-link>
-                <span v-if="reportContent && reportContent === item.report" class="history-current-badge">
-                  <el-tag size="small" type="success">当前</el-tag>
-                </span>
+              <div class="history-item-icon">
+                <el-icon :size="14"><Document /></el-icon>
               </div>
-            </el-timeline-item>
-          </el-timeline>
-        </el-card>
-      </div>
-    </el-main>
+              <div class="history-item-content">
+                <span class="history-item-title">{{ item.topic }}</span>
+                <span class="history-item-time">{{ item.time }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sidebar Bottom: Settings + Knowledge -->
+          <div class="sidebar-bottom">
+            <SettingsPanel
+              ref="settingsRef"
+              @change="onSettingsChange"
+            />
+            <KnowledgePanel />
+          </div>
+        </div>
+      </el-aside>
+
+      <!-- Main Content -->
+      <el-main class="app-main">
+        <div class="content-wrapper">
+          <!-- Research Input -->
+          <ResearchInput
+            :loading="isResearching"
+            @submit="handleSubmit"
+          />
+
+          <!-- Progress Panel (圆形进度 + 运行日志) -->
+          <ProgressPanel
+            v-if="isResearching || progressLog.length > 0"
+            :progress-stages="progressStages"
+            :progress-log="progressLog"
+            :current-stage="currentStage"
+            :show-cancel="isResearching"
+            @cancel="handleCancel"
+          />
+
+          <!-- Token Usage Panel -->
+          <TokenUsagePanel
+            v-if="tokenUsage"
+            :token-usage="tokenUsage"
+          />
+
+          <!-- Error Alert -->
+          <el-alert
+            v-if="errorMessage"
+            :title="errorMessage"
+            type="error"
+            show-icon
+            :closable="true"
+            @close="errorMessage = ''"
+            class="error-alert"
+          />
+
+          <!-- Report Display -->
+          <ReportPanel
+            v-if="reportContent"
+            :report="reportContent"
+            :search-results="searchResults"
+            :fact-check="factCheckData"
+          :topic="lastTopic"
+          @clear="handleClear"
+            @followup="handleFollowUp"
+          />
+        </div>
+      </el-main>
+    </el-container>
 
     <!-- Footer -->
-    <el-footer class="app-footer" height="48px">
+    <el-footer class="app-footer" height="40px">
       <span>CollabAgent MVP v2.0 &copy; 2026</span>
     </el-footer>
   </el-container>
@@ -122,7 +142,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessageBox } from 'element-plus'
-import { Connection, Clock } from '@element-plus/icons-vue'
+import { Connection, Fold, Expand, Clock, Document } from '@element-plus/icons-vue'
 import ResearchInput from './components/ResearchInput.vue'
 import ProgressPanel from './components/ProgressPanel.vue'
 import ReportPanel from './components/ReportPanel.vue'
@@ -132,6 +152,7 @@ import KnowledgePanel from './components/KnowledgePanel.vue'
 
 const HISTORY_KEY = 'collab-agent-history'
 
+const sidebarOpen = ref(true)
 const isResearching = ref(false)
 const errorMessage = ref('')
 const reportContent = ref('')
@@ -411,25 +432,29 @@ function handleClear() {
 </script>
 
 <style scoped>
+/* ── Root ── */
 .app-container {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  background: #f5f7fa;
 }
 
+/* ── Header ── */
 .app-header {
-  background: linear-gradient(135deg, #409eff, #337ecc);
-  color: white;
+  background: #fff;
+  color: #303133;
   display: flex;
   align-items: center;
-  padding: 0 24px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding: 0 16px;
+  border-bottom: 1px solid #e4e7ed;
+  box-shadow: 0 1px 4px rgba(0,0,0,.04);
+  z-index: 100;
+  position: relative;
 }
 
 .header-content {
   width: 100%;
-  max-width: 1200px;
-  margin: 0 auto;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -438,89 +463,190 @@ function handleClear() {
 .header-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+}
+
+.sidebar-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #606266;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s;
+}
+
+.sidebar-toggle:hover {
+  background: #f0f2f5;
 }
 
 .header-icon {
-  background: rgba(255, 255, 255, 0.2);
-  padding: 6px;
-  border-radius: 8px;
+  color: #409eff;
 }
 
 .header-text {
   display: flex;
-  flex-direction: column;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .app-title {
-  font-size: 20px;
-  font-weight: 600;
+  font-size: 17px;
+  font-weight: 700;
   margin: 0;
   line-height: 1.2;
+  color: #303133;
 }
 
 .app-subtitle {
   font-size: 12px;
-  opacity: 0.85;
+  color: #909399;
 }
 
+/* ── Body (sidebar + main) ── */
+.body-container {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* ── Sidebar ── */
+.app-sidebar {
+  background: #fff;
+  border-right: 1px solid #e4e7ed;
+  transition: width .25s ease;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-inner {
+  width: 280px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+}
+
+.sidebar-header-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.sidebar-history {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 10px;
+}
+
+.sidebar-empty {
+  text-align: center;
+  color: #c0c4cc;
+  font-size: 13px;
+  padding: 32px 0;
+}
+
+.sidebar-history .history-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background .12s;
+  margin-bottom: 2px;
+}
+
+.sidebar-history .history-item:hover {
+  background: #f5f7fa;
+}
+
+.sidebar-history .history-item.active {
+  background: #ecf5ff;
+}
+
+.history-item-icon {
+  flex-shrink: 0;
+  color: #909399;
+  margin-top: 2px;
+}
+
+.history-item-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.history-item-title {
+  font-size: 13px;
+  color: #303133;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.history-item-time {
+  font-size: 11px;
+  color: #c0c4cc;
+}
+
+.sidebar-bottom {
+  border-top: 1px solid #f0f0f0;
+  padding: 10px 12px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Main ── */
 .app-main {
   flex: 1;
-  padding: 24px;
-  max-width: 1200px;
-  width: 100%;
+  padding: 20px 24px;
+  overflow-y: auto;
+  max-width: 960px;
   margin: 0 auto;
+  width: 100%;
   box-sizing: border-box;
 }
 
 .content-wrapper {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 18px;
 }
 
 .error-alert {
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
+/* ── Footer ── */
 .app-footer {
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--el-text-color-secondary);
-  font-size: 13px;
+  font-size: 12px;
   border-top: 1px solid var(--el-border-color-light);
-}
-
-.history-card {
-  border-radius: 12px;
-}
-
-.history-card .card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.history-card .card-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 16px;
-  font-weight: 600;
-  margin: 0;
-}
-
-.history-item {
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-}
-
-.history-item:hover {
-  opacity: 0.8;
+  background: #fff;
 }
 </style>

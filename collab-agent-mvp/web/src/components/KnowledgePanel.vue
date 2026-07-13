@@ -51,15 +51,19 @@
 
         <!-- Chunks list -->
         <div v-if="chunks.length" class="chunks-list">
-          <p class="chunks-summary">共 {{ chunks.length }} 个文档块，研究时将自动检索相关知识</p>
-          <el-table :data="chunks" size="small" stripe max-height="300">
-            <el-table-column prop="source" label="来源" width="150" show-overflow-tooltip />
-            <el-table-column prop="content" label="内容摘要" min-width="250" show-overflow-tooltip />
-            <el-table-column prop="chunk_index" label="#" width="50" />
-          </el-table>
+          <p class="chunks-summary">{{ chunks.length }} 个文档块</p>
+          <div class="chunk-items">
+            <div v-for="(c, i) in chunks.slice(0, 10)" :key="i" class="chunk-item">
+              <span class="chunk-source">{{ c.source || '未知' }}</span>
+              <span class="chunk-preview">{{ (c.content || '').slice(0, 60) }}...</span>
+            </div>
+            <div v-if="chunks.length > 10" class="chunk-more">
+              还有 {{ chunks.length - 10 }} 块...
+            </div>
+          </div>
         </div>
         <div v-else class="empty-hint">
-          <el-empty description="尚未上传知识文档" :image-size="60" />
+          <span class="empty-text">暂无知识文档</span>
         </div>
       </div>
     </el-collapse-transition>
@@ -124,7 +128,10 @@ async function handleClear() {
 
 <style scoped>
 .knowledge-card {
-  border-radius: 12px;
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  border-radius: 8px;
 }
 
 .knowledge-header {
@@ -133,18 +140,28 @@ async function handleClear() {
   align-items: center;
   cursor: pointer;
   user-select: none;
+  padding: 6px 8px;
+  border-radius: 6px;
+  transition: background .12s;
+}
+
+.knowledge-header:hover {
+  background: #f5f7fa;
 }
 
 .knowledge-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
+  gap: 6px;
+  font-size: 13px;
   font-weight: 600;
+  color: #606266;
 }
 
 .chevron {
   transition: transform 0.3s ease;
+  font-size: 14px;
+  color: #c0c4cc;
 }
 
 .chevron.rotated {
@@ -152,26 +169,63 @@ async function handleClear() {
 }
 
 .knowledge-body {
-  padding-top: 16px;
+  padding: 8px 8px 0;
 }
 
 .upload-row {
   display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 6px;
+  margin-bottom: 8px;
 }
 
 .upload-alert {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .chunks-summary {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--el-text-color-secondary);
-  margin: 0 0 8px 0;
+  margin: 0 0 6px 0;
+}
+
+.chunk-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chunk-item {
+  background: #f8f9fa;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.chunk-source {
+  font-weight: 500;
+  color: #409eff;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.chunk-preview {
+  color: #909399;
+}
+
+.chunk-more {
+  font-size: 12px;
+  color: #c0c4cc;
+  text-align: center;
+  padding: 4px 0;
 }
 
 .empty-hint {
-  padding: 16px 0;
+  padding: 8px 0;
+}
+
+.empty-text {
+  font-size: 12px;
+  color: #c0c4cc;
 }
 </style>

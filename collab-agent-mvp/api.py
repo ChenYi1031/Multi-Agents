@@ -62,6 +62,53 @@ class StreamTask:
 _active_streams: Dict[str, StreamTask] = {}
 
 
+def _merge_token_usage(*usages: dict) -> dict:
+    """
+    合并多个 token_usage 字典，汇总统计和 calls 列表。
+    用于累加 researcher + writer 两个节点的 token 用量。
+    """
+    merged = {
+        "total_input_tokens": 0,
+        "total_output_tokens": 0,
+        "total_tokens": 0,
+        "total_cost": 0.0,
+        "call_count": 0,
+        "calls": [],
+    }
+    for u in usages:
+        if not u:
+            continue
+        merged["total_input_tokens"] += u.get("total_input_tokens", 0) or 0
+        merged["total_output_tokens"] += u.get("total_output_tokens", 0) or 0
+        merged["total_tokens"] += u.get("total_tokens", 0) or 0
+        merged["total_cost"] += u.get("total_cost", 0) or 0
+        merged["call_count"] += u.get("call_count", 0) or 0
+        merged["calls"].extend(u.get("calls", []) or [])
+
+    # 重建 agent_breakdown（如果原始数据有 agent 字段）
+    agent_map = {}
+    for c in merged["calls"]:
+        agent = c.get("agent", "unknown")
+        if agent not in agent_map:
+            agent_map[agent] = {
+                "agent": agent,
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_tokens": 0,
+                "total_cost": 0.0,
+                "call_count": 0,
+            }
+        agent_map[agent]["total_input_tokens"] += c.get("input_tokens", 0) or 0
+        agent_map[agent]["total_output_tokens"] += c.get("output_tokens", 0) or 0
+        agent_map[agent]["total_tokens"] += c.get("total_tokens", 0) or 0
+        agent_map[agent]["total_cost"] += c.get("cost", 0) or 0
+        agent_map[agent]["call_count"] += 1
+
+    merged["agent_breakdown"] = list(agent_map.values()) if agent_map else []
+    merged["total_cost"] = round(merged["total_cost"], 6)
+    return merged
+
+
 def _sse(event: str, data: dict) -> str:
     """格式化一条 SSE 消息（命名事件 + JSON data）"""
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -126,11 +173,14 @@ async def research(req: ResearchRequest):
                 content={"status": "error", "detail": final_state["error"]},
             )
 
+        # 从 final_state 中获取 token_usage（graph 自动累加 node 返回的 dict）
+        token_usage = _merge_token_usage(final_state.get("token_usage", {}))
         logger.info(f"研究报告生成完成，主题: {req.topic}")
         return {
             "status": "completed",
             "final_report": final_state["final_report"],
             "search_results": final_state["search_results"],
+            "token_usage": token_usage,
         }
 
     except asyncio.CancelledError:
@@ -190,6 +240,7 @@ async def _run_research_stream(topic: str, stream_task: StreamTask) -> AsyncGene
             "message": f"✅ 找到 {results_count} 条相关结果",
             "count": results_count,
             "search_results": state.get("search_results", []),
+            "token_usage": state.get("token_usage", {}),
         })
 
         # ── 阶段2：报告撰写员 ──
@@ -199,7 +250,14 @@ async def _run_research_stream(topic: str, stream_task: StreamTask) -> AsyncGene
             "message": "✍️ 报告撰写员正在撰写报告...",
         })
         writer_update = await writer_node(state)
+        # 合并 researcher + writer 的 token 用量
+        merged_token_usage = _merge_token_usage(
+            state.get("token_usage", {}),
+            writer_update.get("token_usage", {}),
+        )
+        writer_update.pop("token_usage", None)
         state.update(writer_update)
+        state["token_usage"] = merged_token_usage
 
         await _check_cancelled(stream_task)
         if state.get("error"):
@@ -214,12 +272,14 @@ async def _run_research_stream(topic: str, stream_task: StreamTask) -> AsyncGene
         yield _sse_safe("progress", {
             "stage": "writing_done",
             "message": "✅ 报告生成完成",
+            "token_usage": merged_token_usage,
         })
 
-        # ── 阶段3：完成，推送最终报告 ──
+        # ── 阶段3：完成，推送最终报告与 token 用量 ──
         yield _sse_safe("complete", {
             "report": report,
             "search_results": state.get("search_results", []),
+            "token_usage": merged_token_usage,
         })
 
     except asyncio.CancelledError:

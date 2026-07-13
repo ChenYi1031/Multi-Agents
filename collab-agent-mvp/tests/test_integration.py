@@ -40,16 +40,23 @@ AI技术将持续快速发展。
 # ── Helpers ──────────────────────────────────
 
 def _make_async_mock(return_value):
-    """创建一个同时支持 .invoke() 和 .ainvoke() 的 mock"""
-    mock_instance = MagicMock()
+    """创建一个同时支持 .invoke() 和 .ainvoke() 以及 .bind_tools() 的 mock"""
     mock_response = MagicMock()
     mock_response.content = return_value
-    mock_instance.invoke.return_value = mock_response
 
     async def _ainvoke(*args, **kwargs):
         return mock_response
 
+    mock_instance = MagicMock()
+    mock_instance.invoke.return_value = mock_response
     mock_instance.ainvoke = _ainvoke
+
+    # bind_tools() 返回的对象也必须支持 ainvoke
+    mock_bound = MagicMock()
+    mock_bound.invoke.return_value = mock_response
+    mock_bound.ainvoke = _ainvoke
+    mock_instance.bind_tools.return_value = mock_bound
+
     return mock_instance
 
 

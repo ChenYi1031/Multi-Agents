@@ -20,12 +20,12 @@ from tools.token_tracker import TokenUsageTracker, _extract_token_usage, extract
 logger = logging.getLogger(__name__)
 
 
-def _build_llm(**kwargs):
-    """构建 ChatOpenAI 实例，自动注入通用配置"""
+def _build_llm(model_name: str | None = None, api_key: str | None = None, base_url: str | None = None, **kwargs):
+    """构建 LLM 实例。支持自定义 api_key/base_url（用于供应商配置），也支持默认配置。"""
     return ChatOpenAI(
-        model=OPENAI_MODEL_NAME,
-        api_key=OPENAI_API_KEY,
-        base_url=OPENAI_BASE_URL,
+        model=model_name or OPENAI_MODEL_NAME,
+        api_key=api_key or OPENAI_API_KEY,
+        base_url=base_url or OPENAI_BASE_URL,
         **kwargs,
     )
 
@@ -277,7 +277,10 @@ async def writer_node(state: dict) -> dict:
     if not results:
         research_text = "未找到相关搜索结果，请基于你的知识生成报告。"
 
-    llm = _build_llm(temperature=0.7)
+    model_name = state.get("model_name") or None
+    api_key = state.get("api_key") or None
+    base_url = state.get("api_base_url") or None
+    llm = _build_llm(model_name=model_name, api_key=api_key, base_url=base_url, temperature=0.7)
     token_tracker = TokenUsageTracker(agent="writer")
 
     # ── 异步生成 ──

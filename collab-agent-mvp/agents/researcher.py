@@ -19,6 +19,7 @@ from langchain_openai import ChatOpenAI
 from config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL_NAME
 from tools.search import deduplicate_results, search
 from tools.token_tracker import TokenUsageTracker, _extract_token_usage, extract_model_name
+from tools.rag import search_knowledge
 
 logger = logging.getLogger(__name__)
 
@@ -125,12 +126,12 @@ def _parse_json_from_response(content: str) -> List[dict]:
             raise ValueError(f"无法从响应中提取 JSON: {content[:300]}")
 
 
-def _build_llm(**kwargs):
-    """构建 ChatOpenAI 实例，自动注入通用配置"""
+def _build_llm(model_name: str | None = None, api_key: str | None = None, base_url: str | None = None, **kwargs):
+    """构建 LLM 实例。支持自定义 api_key/base_url（用于供应商配置），也支持默认配置。"""
     return ChatOpenAI(
-        model=OPENAI_MODEL_NAME,
-        api_key=OPENAI_API_KEY,
-        base_url=OPENAI_BASE_URL,
+        model=model_name or OPENAI_MODEL_NAME,
+        api_key=api_key or OPENAI_API_KEY,
+        base_url=base_url or OPENAI_BASE_URL,
         **kwargs,
     )
 
@@ -265,7 +266,10 @@ async def researcher_node(state: dict) -> dict:
     if not topic:
         return {"search_results": [], "error": "研究主题为空"}
 
-    llm = _build_llm(temperature=0.3)
+    model_name = state.get("model_name") or None
+    api_key = state.get("api_key") or None
+    base_url = state.get("api_base_url") or None
+    llm = _build_llm(model_name=model_name, api_key=api_key, base_url=base_url, temperature=0.3)
     token_tracker = TokenUsageTracker(agent="researcher")
 
     @tool
@@ -276,10 +280,32 @@ async def researcher_node(state: dict) -> dict:
 
     llm_with_tools = llm.bind_tools([search_tool])
 
+    # ── 注入知识库内容（RAG） ──
+    knowledge_docs = state.get("knowledge_docs", []) or []
+    knowledge_context = ""
+    if knowledge_docs:
+        # 如果有指定文档 ID，检索这些文档
+        all_chunks = []
+        for doc_id in knowledge_docs:
+            from tools.rag import get_knowledge_base
+            kb = get_knowledge_base()
+            for c in kb.chunks:
+                if c.doc_id == doc_id:
+                    all_chunks.append(c.content)
+        if all_chunks:
+            knowledge_context = "\n\n用户提供的参考资料：\n" + "\n---\n".join(all_chunks)
+    else:
+        # 自动检索相关知识
+        kb_results = search_knowledge(topic, top_k=3)
+        if kb_results:
+            knowledge_context = "\n\n知识库中相关的参考资料：\n" + "\n---\n".join(
+                r["content"] for r in kb_results
+            )
+
     # ── 首次尝试 ──
     try:
         messages = [
-            SystemMessage(content=RESEARCHER_PROMPT),
+            SystemMessage(content=RESEARCHER_PROMPT + knowledge_context),
             HumanMessage(content=f"研究主题：{topic}"),
         ]
         response = await _run_tool_loop_async(llm, llm_with_tools, messages, token_tracker)
@@ -294,7 +320,7 @@ async def researcher_node(state: dict) -> dict:
     # ── 重试（附加严格提示） ──
     try:
         messages = [
-            SystemMessage(content=RESEARCHER_PROMPT),
+            SystemMessage(content=RESEARCHER_PROMPT + knowledge_context),
             HumanMessage(content=f"研究主题：{topic}"),
             SystemMessage(content="请确保输出严格的 JSON 数组格式，不要包含额外的文字说明。"),
         ]

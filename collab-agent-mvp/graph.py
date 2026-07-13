@@ -13,6 +13,7 @@ from langgraph.graph import END, START, StateGraph
 
 from agents.researcher import researcher_node
 from agents.writer import writer_node, writer_node_sync
+from agents.fact_checker import fact_checker_node
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,19 @@ class ResearchState(TypedDict):
     final_report: str
     error: str
     token_usage: dict
+    # 多轮对话
+    followup_question: str
+    conversation_history: List[dict]
+    # 动态配置
+    model_name: str
+    search_source: str
+    api_base_url: str
+    api_key: str
+    api_format: str
+    # Fact-Check
+    fact_check_report: str
+    # RAG
+    knowledge_docs: List[str]
 
 
 def create_graph() -> StateGraph:
@@ -42,10 +56,12 @@ def create_graph() -> StateGraph:
 
     builder.add_node("research", researcher_node)
     builder.add_node("write_report", writer_node)
+    builder.add_node("fact_check", fact_checker_node)
 
     builder.add_edge(START, "research")
     builder.add_edge("research", "write_report")
-    builder.add_edge("write_report", END)
+    builder.add_edge("write_report", "fact_check")
+    builder.add_edge("fact_check", END)
 
     # 使用内存 saver，方便调试
     memory = MemorySaver()

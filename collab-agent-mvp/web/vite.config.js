@@ -14,7 +14,10 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
-      // 前缀匹配确保 /research/stream/* 等子路径也被代理
+      '/knowledge': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
     },
   },
   build: {

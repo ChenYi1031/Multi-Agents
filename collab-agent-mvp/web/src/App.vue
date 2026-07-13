@@ -25,13 +25,28 @@
     <!-- Main Content -->
     <el-main class="app-main">
       <div class="content-wrapper">
+        <!-- Settings Panel (模型供应商管理) -->
+        <SettingsPanel
+          ref="settingsRef"
+          @change="onSettingsChange"
+        />
+
+        <!-- Knowledge Base (RAG) -->
+        <KnowledgePanel />
+
         <!-- Research Input -->
         <ResearchInput
           :loading="isResearching"
           @submit="handleSubmit"
         />
 
-        <!-- Progress Panel (visible during research) -->
+        <!-- DAG Visualization -->
+        <DagVisualizer
+          v-if="isResearching || progressStages.some(s => s.done || s.active)"
+          :stages="progressStages"
+        />
+
+        <!-- Progress Panel -->
         <ProgressPanel
           v-if="isResearching || progressLog.length > 0"
           :progress-stages="progressStages"
@@ -63,7 +78,12 @@
           v-if="reportContent"
           :report="reportContent"
           :search-results="searchResults"
+          :fact-check="factCheckData"
+          :topic="lastTopic"
+          :model-name="modelName"
+          :search-source="searchSource"
           @clear="handleClear"
+          @followup="handleFollowUp"
         />
 
         <!-- Research History -->
@@ -95,11 +115,12 @@
             </el-timeline-item>
           </el-timeline>
         </el-card>
+      </div>
     </el-main>
 
     <!-- Footer -->
     <el-footer class="app-footer" height="48px">
-      <span>CollabAgent MVP v1.0 &copy; 2026</span>
+      <span>CollabAgent MVP v2.0 &copy; 2026</span>
     </el-footer>
   </el-container>
 </template>
@@ -111,6 +132,9 @@ import ResearchInput from './components/ResearchInput.vue'
 import ProgressPanel from './components/ProgressPanel.vue'
 import ReportPanel from './components/ReportPanel.vue'
 import TokenUsagePanel from './components/TokenUsagePanel.vue'
+import SettingsPanel from './components/SettingsPanel.vue'
+import DagVisualizer from './components/DagVisualizer.vue'
+import KnowledgePanel from './components/KnowledgePanel.vue'
 
 const HISTORY_KEY = 'collab-agent-history'
 
@@ -125,11 +149,32 @@ const currentTaskId = ref('')
 const eventSourceRef = ref(null)
 const historyList = ref([])
 const tokenUsage = ref(null)
+const settingsRef = ref(null)
+const factCheckData = ref(null)
+const lastTopic = ref('')
+const followupPanel = ref(false)
+
+// Provider config (from SettingsPanel)
+const providerConfig = ref(null)
+
+function onSettingsChange({ provider }) {
+  if (provider) {
+    providerConfig.value = {
+      api_base_url: provider.baseUrl,
+      api_key: provider.apiKey,
+      api_format: provider.apiFormat,
+      model_name: provider.selectedModel,
+    }
+  } else {
+    providerConfig.value = null
+  }
+}
 
 const progressStages = reactive([
-  { key: 'research', label: '信息搜索', icon: 'Search', done: false, active: false },
-  { key: 'writing', label: '报告撰写', icon: 'Edit', done: false, active: false },
-  { key: 'complete', label: '生成完成', icon: 'Check', done: false, active: false },
+  { key: 'research',   label: '信息搜索',   done: false, active: false },
+  { key: 'writing',    label: '报告撰写',   done: false, active: false },
+  { key: 'fact_check', label: '事实核查',   done: false, active: false },
+  { key: 'complete',   label: '生成完成',   done: false, active: false },
 ])
 
 onMounted(async () => {
@@ -141,25 +186,14 @@ function loadHistory() {
   try {
     const raw = localStorage.getItem(HISTORY_KEY)
     historyList.value = raw ? JSON.parse(raw) : []
-  } catch {
-    historyList.value = []
-  }
+  } catch { historyList.value = [] }
 }
 
 function saveToHistory(topic, report, results) {
-  const entry = {
-    topic,
-    report,
-    searchResults: results,
-    time: new Date().toLocaleString('zh-CN'),
-  }
+  const entry = { topic, report, searchResults: results, time: new Date().toLocaleString('zh-CN') }
   const list = [entry, ...historyList.value.filter(h => h.topic !== topic)].slice(0, 20)
   historyList.value = list
-  try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(list))
-  } catch {
-    // localStorage full, ignore
-  }
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)) } catch { /* ok */ }
 }
 
 function restoreHistory(item) {
@@ -180,47 +214,31 @@ async function checkHealth() {
     const res = await fetch('/health')
     const data = await res.json()
     backendStatus.value = data.status
-  } catch {
-    backendStatus.value = 'error'
-  }
+  } catch { backendStatus.value = 'error' }
 }
 
 function resetStages() {
-  progressStages.forEach(s => {
-    s.done = false
-    s.active = false
-  })
+  progressStages.forEach(s => { s.done = false; s.active = false })
   progressLog.value = []
   currentStage.value = 'idle'
 }
 
 function addLog(message, type = 'info') {
-  progressLog.value.push({
-    id: Date.now() + Math.random(),
-    message,
-    type,
-    time: new Date().toLocaleTimeString(),
-  })
+  progressLog.value.push({ id: Date.now() + Math.random(), message, type, time: new Date().toLocaleTimeString() })
 }
 
 function handleCancel() {
   if (!currentTaskId.value) {
-    // No task ID, just close
-    if (eventSourceRef.value) {
-      eventSourceRef.value.close()
-    }
+    if (eventSourceRef.value) eventSourceRef.value.close()
     isResearching.value = false
     addLog('⏹ 研究任务已取消', 'info')
     return
   }
-
   addLog('⏹ 正在取消研究任务...', 'info')
   fetch(`/research/stream/${currentTaskId.value}`, { method: 'DELETE' })
     .catch(() => {})
     .finally(() => {
-      if (eventSourceRef.value) {
-        eventSourceRef.value.close()
-      }
+      if (eventSourceRef.value) eventSourceRef.value.close()
       isResearching.value = false
       addLog('⏹ 研究任务已取消', 'info')
     })
@@ -233,32 +251,38 @@ function handleSubmit(topic) {
   errorMessage.value = ''
   reportContent.value = ''
   searchResults.value = []
+  factCheckData.value = null
   currentTaskId.value = ''
   tokenUsage.value = null
+  lastTopic.value = topic
   resetStages()
 
   addLog(`开始研究主题: "${topic}"`, 'info')
   currentStage.value = 'research'
   progressStages[0].active = true
 
-  const eventSource = new EventSource(
-    `/research/stream?topic=${encodeURIComponent(topic)}`
-  )
+  // Build SSE URL with optional provider config
+  let url = `/research/stream?topic=${encodeURIComponent(topic)}`
+  if (providerConfig.value) {
+    const c = providerConfig.value
+    if (c.model_name) url += `&model_name=${encodeURIComponent(c.model_name)}`
+    if (c.api_base_url) url += `&api_base_url=${encodeURIComponent(c.api_base_url)}`
+    if (c.api_key) url += `&api_key=${encodeURIComponent(c.api_key)}`
+    if (c.api_format) url += `&api_format=${encodeURIComponent(c.api_format)}`
+  }
+
+  const eventSource = new EventSource(url)
   eventSourceRef.value = eventSource
 
   eventSource.addEventListener('progress', (e) => {
     const data = JSON.parse(e.data)
     const { stage, message, task_id } = data
 
-    // Save task_id for cancellation (from "starting" stage)
-    if (task_id) {
-      currentTaskId.value = task_id
-    }
-
+    if (task_id) currentTaskId.value = task_id
     addLog(message, 'progress')
 
     if (stage === 'starting') {
-      // Just log, no stage change
+      // no stage change
     } else if (stage === 'research') {
       currentStage.value = 'research'
       progressStages[0].active = true
@@ -267,12 +291,8 @@ function handleSubmit(topic) {
       progressStages[0].done = true
       progressStages[0].active = false
       currentStage.value = 'research_done'
-      if (data.search_results) {
-        searchResults.value = data.search_results
-      }
-      if (data.token_usage) {
-        tokenUsage.value = data.token_usage
-      }
+      if (data.search_results) searchResults.value = data.search_results
+      if (data.token_usage) tokenUsage.value = data.token_usage
     } else if (stage === 'writing') {
       currentStage.value = 'writing'
       progressStages[1].active = true
@@ -281,27 +301,32 @@ function handleSubmit(topic) {
       progressStages[1].done = true
       progressStages[1].active = false
       currentStage.value = 'writing_done'
+    } else if (stage === 'fact_check') {
+      currentStage.value = 'fact_check'
+      progressStages[2].active = true
+      progressStages[2].done = false
+    } else if (stage === 'fact_check_done') {
+      progressStages[2].done = true
+      progressStages[2].active = false
+      currentStage.value = 'fact_check_done'
+      if (data.fact_check) factCheckData.value = data.fact_check
+      if (data.token_usage) tokenUsage.value = data.token_usage
     }
   })
 
   eventSource.addEventListener('complete', (e) => {
     const data = JSON.parse(e.data)
     reportContent.value = data.report
-    if (data.search_results) {
-      searchResults.value = data.search_results
-    }
-    if (data.token_usage) {
-      tokenUsage.value = data.token_usage
-    }
-    progressStages[2].done = true
+    if (data.search_results) searchResults.value = data.search_results
+    if (data.token_usage) tokenUsage.value = data.token_usage
+    if (data.fact_check) factCheckData.value = data.fact_check
+    progressStages[3].done = true
     currentStage.value = 'complete'
     addLog('✅ 研究报告生成完成！', 'success')
     isResearching.value = false
     eventSource.close()
     eventSourceRef.value = null
-
-    // Save to history
-    saveToHistory(topic, data.report, data.search_results || [])
+    saveToHistory(lastTopic.value, data.report, data.search_results || [])
   })
 
   eventSource.addEventListener('error', (e) => {
@@ -309,11 +334,9 @@ function handleSubmit(topic) {
       const data = JSON.parse((e.data || '{}'))
       errorMessage.value = data.message || '研究过程发生错误，请重试'
     } catch {
-      if (eventSource.readyState === EventSource.CLOSED) {
-        errorMessage.value = '连接中断，请检查后端服务是否运行'
-      } else {
-        errorMessage.value = '研究过程发生错误，请重试'
-      }
+      errorMessage.value = eventSource.readyState === EventSource.CLOSED
+        ? '连接中断，请检查后端服务是否运行'
+        : '研究过程发生错误，请重试'
     }
     addLog(`❌ ${errorMessage.value}`, 'error')
     isResearching.value = false
@@ -322,9 +345,54 @@ function handleSubmit(topic) {
   })
 }
 
+async function handleFollowUp(payload) {
+  addLog(`🔍 发起追问: "${payload.followup_question}"`, 'info')
+  isResearching.value = true
+  errorMessage.value = ''
+  resetStages()
+  progressStages[0].active = true
+  currentStage.value = 'research'
+
+  // Merge provider config into followup payload
+  const extendedPayload = { ...payload }
+  if (providerConfig.value) {
+    extendedPayload.api_base_url = providerConfig.value.api_base_url
+    extendedPayload.api_key = providerConfig.value.api_key
+    extendedPayload.api_format = providerConfig.value.api_format
+    extendedPayload.model_name = providerConfig.value.model_name
+  }
+
+  try {
+    const res = await fetch('/research/followup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(extendedPayload),
+    })
+    const data = await res.json()
+    if (data.status === 'error') {
+      errorMessage.value = data.detail || '追问失败'
+      addLog(`❌ ${errorMessage.value}`, 'error')
+    } else {
+      reportContent.value = data.final_report
+      searchResults.value = data.search_results || []
+      if (data.token_usage) tokenUsage.value = data.token_usage
+      if (data.fact_check) factCheckData.value = data.fact_check
+      addLog('✅ 追问完成，报告已更新', 'success')
+      progressStages[3].done = true
+      currentStage.value = 'complete'
+    }
+  } catch (e) {
+    errorMessage.value = '追问请求失败: ' + e.message
+    addLog(`❌ ${errorMessage.value}`, 'error')
+  } finally {
+    isResearching.value = false
+  }
+}
+
 function handleClear() {
   reportContent.value = ''
   searchResults.value = []
+  factCheckData.value = null
   progressLog.value = []
   tokenUsage.value = null
   resetStages()
@@ -413,7 +481,6 @@ function handleClear() {
   border-top: 1px solid var(--el-border-color-light);
 }
 
-/* History card */
 .history-card {
   border-radius: 12px;
 }

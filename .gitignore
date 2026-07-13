@@ -26,3 +26,6 @@ Thumbs.db
 # 项目本地文件（不公开）
 PROJECT_PORTFOLIO.md
 doc.md
+
+# Sisyphus 工作目录
+.zcode/

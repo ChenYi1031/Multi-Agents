@@ -82,6 +82,7 @@ def _make_initial_state(topic: str, **extra) -> dict:
         "api_format": extra.get("api_format", ""),
         "fact_check_report": "",
         "knowledge_docs": [],
+        "use_llm": extra.get("use_llm", True),
     }
 
 
@@ -284,12 +285,14 @@ async def _run_research_stream(
     api_base_url: str = "",
     api_key: str = "",
     api_format: str = "",
+    use_llm: bool = True,
 ) -> AsyncGenerator[str, None]:
     """
     生成 SSE 事件流：研究 → 撰写 → 事实核查 → 完成（或出错/取消）
     通过 await 直接调用 async node，不阻塞事件循环。
     支持通过 stream_task.cancel_event 实现外部取消。
     支持动态 model_name/search_source 和供应商 API 配置。
+    当 use_llm=False 时，跳过 LLM 调用，仅使用搜索 + 模板报告。
     """
     state = _make_initial_state(
         topic,
@@ -298,6 +301,7 @@ async def _run_research_stream(
         api_base_url=api_base_url,
         api_key=api_key,
         api_format=api_format,
+        use_llm=use_llm,
     )
 
     # 超时控制：总流程最多 300 秒，每个节点最多 120 秒
@@ -376,40 +380,47 @@ async def _run_research_stream(
             "token_usage": merged_token_usage,
         })
 
-        # ── 阶段3：事实核查 ──
-        await _check_cancelled(stream_task)
-        yield _sse_safe("progress", {
-            "stage": "fact_check",
-            "message": "🔍 事实核查员正在校验报告...",
-        })
-        try:
-            fact_check_update = await asyncio.wait_for(fact_checker_node(state), timeout=_NODE_TIMEOUT)
-        except asyncio.TimeoutError:
-            yield _sse_safe("error", {"message": f"⏰ 事实核查阶段超时（超过 {_NODE_TIMEOUT} 秒），请检查 API Key 和网络配置"})
-            return
-        merged_token_usage = _merge_token_usage(
-            merged_token_usage,
-            fact_check_update.get("token_usage", {}),
-        )
-        fact_check_update.pop("token_usage", None)
-        state.update(fact_check_update)
-        state["token_usage"] = merged_token_usage
-        await _timeout_check()
-
-        fact_check_raw = state.get("fact_check_report", "")
+        # ── 阶段3：事实核查（仅 when use_llm=True） ──
         fact_check_data = {}
-        if fact_check_raw:
+        if state.get("use_llm", True):
+            await _check_cancelled(stream_task)
+            yield _sse_safe("progress", {
+                "stage": "fact_check",
+                "message": "🔍 事实核查员正在校验报告...",
+            })
             try:
-                fact_check_data = json.loads(fact_check_raw)
-            except (json.JSONDecodeError, TypeError):
-                fact_check_data = {"raw": fact_check_raw}
+                fact_check_update = await asyncio.wait_for(fact_checker_node(state), timeout=_NODE_TIMEOUT)
+            except asyncio.TimeoutError:
+                yield _sse_safe("error", {"message": f"⏰ 事实核查阶段超时（超过 {_NODE_TIMEOUT} 秒），请检查 API Key 和网络配置"})
+                return
+            merged_token_usage = _merge_token_usage(
+                merged_token_usage,
+                fact_check_update.get("token_usage", {}),
+            )
+            fact_check_update.pop("token_usage", None)
+            state.update(fact_check_update)
+            state["token_usage"] = merged_token_usage
+            await _timeout_check()
 
-        yield _sse_safe("progress", {
-            "stage": "fact_check_done",
-            "message": f"✅ 事实核查完成：{fact_check_data.get('verified', 0)}/{fact_check_data.get('total_claims', 0)} 条主张已验证",
-            "fact_check": fact_check_data,
-            "token_usage": merged_token_usage,
-        })
+            fact_check_raw = state.get("fact_check_report", "")
+            if fact_check_raw:
+                try:
+                    fact_check_data = json.loads(fact_check_raw)
+                except (json.JSONDecodeError, TypeError):
+                    fact_check_data = {"raw": fact_check_raw}
+
+            yield _sse_safe("progress", {
+                "stage": "fact_check_done",
+                "message": f"✅ 事实核查完成：{fact_check_data.get('verified', 0)}/{fact_check_data.get('total_claims', 0)} 条主张已验证",
+                "fact_check": fact_check_data,
+                "token_usage": merged_token_usage,
+            })
+        else:
+            yield _sse_safe("progress", {
+                "stage": "fact_check_done",
+                "message": "⏭️ 事实核查已跳过（无 LLM 模式）",
+                "token_usage": merged_token_usage,
+            })
 
         # ── 阶段4：完成 ──
         yield _sse_safe("complete", {
@@ -440,6 +451,7 @@ async def research_stream(
     api_base_url: str = Query(default="", description="自定义 API Base URL（供应商配置）"),
     api_key: str = Query(default="", description="自定义 API Key（供应商配置）"),
     api_format: str = Query(default="", description="API 格式 (openai / anthropic)"),
+    use_llm: str = Query(default="true", description="是否启用 LLM 参与 (true/false)"),
 ):
     """
     流式研究端点（SSE）
@@ -455,7 +467,9 @@ async def research_stream(
     if not topic or not topic.strip():
         raise HTTPException(status_code=400, detail="研究主题不能为空")
 
-    logger.info(f"收到流式研究请求, 主题={topic}, model={model_name or 'default'}, source={search_source or 'default'}")
+    use_llm_bool = use_llm.lower() == "true"
+
+    logger.info(f"收到流式研究请求, 主题={topic}, model={model_name or 'default'}, source={search_source or 'default'}, use_llm={use_llm_bool}")
     stream_task = StreamTask(task_id=str(uuid.uuid4()), topic=topic)
     _active_streams[stream_task.task_id] = stream_task
 
@@ -466,6 +480,7 @@ async def research_stream(
             "task_id": stream_task.task_id,
             "model_name": model_name or "default",
             "search_source": search_source or "default",
+            "use_llm": use_llm_bool,
         })
         async for event in _run_research_stream(
             topic, stream_task,
@@ -474,6 +489,7 @@ async def research_stream(
             api_base_url=api_base_url,
             api_key=api_key,
             api_format=api_format,
+            use_llm=use_llm_bool,
         ):
             yield event
 
@@ -574,6 +590,7 @@ class FollowUpRequest(BaseModel):
     api_base_url: str = ""
     api_key: str = ""
     api_format: str = ""
+    use_llm: bool = True
 
 
 @app.post("/research/followup")
@@ -594,6 +611,7 @@ async def research_followup(req: FollowUpRequest):
         api_base_url=req.api_base_url,
         api_key=req.api_key,
         api_format=req.api_format,
+        use_llm=req.use_llm,
     )
     initial_state["followup_question"] = req.followup_question
     initial_state["conversation_history"] = [

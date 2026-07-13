@@ -39,6 +39,8 @@ class ResearchState(TypedDict):
     fact_check_report: str
     # RAG
     knowledge_docs: List[str]
+    # LLM 参与开关
+    use_llm: bool
 
 
 def create_graph() -> StateGraph:

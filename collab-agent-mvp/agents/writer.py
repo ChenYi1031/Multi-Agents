@@ -251,6 +251,32 @@ async def _continue_report_async(
 # ──────────────────────────────────────────────
 
 
+def _build_template_report(topic: str, results: list) -> str:
+    """基于搜索结果生成模板化 Markdown 报告（无需 LLM）"""
+    lines = [f"# {topic} 研究报告", ""]
+    if results:
+        lines.append("## 搜索结果摘要")
+        lines.append("")
+        for i, r in enumerate(results, 1):
+            title = r.get("title", "无标题")
+            summary = r.get("summary", "无摘要")
+            source = r.get("source", "")
+            lines.append(f"### {i}. {title}")
+            lines.append("")
+            lines.append(summary)
+            if source:
+                lines.append(f"")
+                lines.append(f"来源：[{source}]({source})")
+            lines.append("")
+        lines.append("---")
+        lines.append("")
+    lines.append("## 结论")
+    lines.append("")
+    lines.append(f"以上是围绕「{topic}」的搜索结果汇总，共找到 {len(results)} 条相关信息。")
+    lines.append("如需更深入的分析，请启用 LLM 参与以生成结构化报告。")
+    return "\n".join(lines)
+
+
 async def writer_node(state: dict) -> dict:
     """
     异步撰写员节点：基于搜索结果生成 Markdown 报告
@@ -264,12 +290,23 @@ async def writer_node(state: dict) -> dict:
     """
     topic = state.get("topic", "")
     results = state.get("search_results", [])
+    use_llm = state.get("use_llm", True)
 
     if state.get("error") and not results:
         return {
             "draft_report": "",
             "final_report": "",
             "error": state["error"],
+        }
+
+    # ── 无 LLM 模式：直接生成模板报告 ──
+    if not use_llm:
+        logger.info("无 LLM 模式：使用模板生成报告")
+        draft = _build_template_report(topic, results)
+        return {
+            "draft_report": draft,
+            "final_report": draft,
+            "token_usage": {"agent": "writer", "total_input_tokens": 0, "total_output_tokens": 0, "total_tokens": 0, "call_count": 0, "calls": []},
         }
 
     research_text = json.dumps(results, indent=2, ensure_ascii=False)
@@ -284,17 +321,31 @@ async def writer_node(state: dict) -> dict:
     token_tracker = TokenUsageTracker(agent="writer")
 
     # ── 异步生成 ──
+    llm_failed = False
     try:
         prompt = _build_prompt(topic, research_text)
         draft = await _generate_report_async(llm, prompt, token_tracker)
     except Exception as e:
         logger.error(f"报告生成失败: {e}")
-        return {
-            "draft_report": "",
-            "final_report": "",
-            "error": f"报告生成失败: {e}",
-            "token_usage": token_tracker.get_summary(),
-        }
+        llm_failed = True
+
+    # LLM 失败且有搜索结果 → 降级为模板报告
+    if llm_failed:
+        if results:
+            logger.info("LLM 报告生成失败，降级为模板报告")
+            draft = _build_template_report(topic, results)
+            return {
+                "draft_report": draft,
+                "final_report": draft,
+                "token_usage": token_tracker.get_summary(),
+            }
+        else:
+            return {
+                "draft_report": "",
+                "final_report": "",
+                "error": f"报告生成失败: {e}",
+                "token_usage": token_tracker.get_summary(),
+            }
 
     # ── 校验 ──
     issues = validate_report(draft, topic, results)

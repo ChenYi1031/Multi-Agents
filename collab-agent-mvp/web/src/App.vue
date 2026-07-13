@@ -147,6 +147,7 @@ const settingsRef = ref(null)
 const factCheckData = ref(null)
 const lastTopic = ref('')
 const followupPanel = ref(false)
+const currentUseLlm = ref(true)
 
 // Provider config (from SettingsPanel)
 const providerConfig = ref(null)
@@ -238,9 +239,10 @@ function handleCancel() {
     })
 }
 
-function handleSubmit(topic) {
+function handleSubmit(topic, useLlm = true) {
   if (!topic.trim()) return
 
+  currentUseLlm.value = useLlm
   isResearching.value = true
   errorMessage.value = ''
   reportContent.value = ''
@@ -251,12 +253,12 @@ function handleSubmit(topic) {
   lastTopic.value = topic
   resetStages()
 
-  addLog(`开始研究主题: "${topic}"`, 'info')
+  addLog(`开始研究: "${topic}"`, 'info')
   currentStage.value = 'research'
   progressStages[0].active = true
 
-  // Build SSE URL with optional provider config
-  let url = `/research/stream?topic=${encodeURIComponent(topic)}`
+  // Build SSE URL with optional provider config and LLM toggle
+  let url = `/research/stream?topic=${encodeURIComponent(topic)}&use_llm=${useLlm}`
   if (providerConfig.value) {
     const c = providerConfig.value
     if (c.model_name) url += `&model_name=${encodeURIComponent(c.model_name)}`
@@ -362,8 +364,8 @@ async function handleFollowUp(payload) {
   progressStages[0].active = true
   currentStage.value = 'research'
 
-  // Merge provider config into followup payload
-  const extendedPayload = { ...payload }
+  // Merge provider config + LLM toggle into followup payload
+  const extendedPayload = { ...payload, use_llm: currentUseLlm.value }
   if (providerConfig.value) {
     extendedPayload.api_base_url = providerConfig.value.api_base_url
     extendedPayload.api_key = providerConfig.value.api_key

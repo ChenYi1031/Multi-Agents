@@ -261,16 +261,34 @@ async def researcher_node(state: dict) -> dict:
     异步研究员节点：分析主题 → 搜索信息 → 返回结构化结果
     正确处理 LLM function calling 循环
     内置 token 用量追踪
+    当 use_llm=False 时跳过 LLM，直接进行关键词搜索。
     """
     topic = state.get("topic", "")
     if not topic:
         return {"search_results": [], "error": "研究主题为空"}
 
+    use_llm = state.get("use_llm", True)
+    token_tracker = TokenUsageTracker(agent="researcher")
+
+    # ── 无 LLM 模式：直接搜索，跳过 LLM 调用 ──
+    if not use_llm:
+        logger.info(f"无 LLM 模式：直接搜索 '{topic}'")
+        raw_results = search(topic)
+        from tools.search import deduplicate_results
+        if raw_results:
+            return {
+                "search_results": deduplicate_results(raw_results),
+                "token_usage": token_tracker.get_summary(),
+            }
+        return {
+            "search_results": [],
+            "token_usage": token_tracker.get_summary(),
+        }
+
     model_name = state.get("model_name") or None
     api_key = state.get("api_key") or None
     base_url = state.get("api_base_url") or None
     llm = _build_llm(model_name=model_name, api_key=api_key, base_url=base_url, temperature=0.3)
-    token_tracker = TokenUsageTracker(agent="researcher")
 
     @tool
     def search_tool(query: str) -> str:

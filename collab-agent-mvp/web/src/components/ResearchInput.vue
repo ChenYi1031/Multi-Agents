@@ -36,6 +36,11 @@
           <span v-else>开始研究</span>
         </el-button>
       </div>
+      <div class="form-options">
+        <el-checkbox v-model="useLlm" :disabled="loading" size="small">
+          LLM 参与（勾选后将搜索结果交给 AI 二次加工生成结构化报告）
+        </el-checkbox>
+      </div>
       <!-- Example topics -->
       <div class="example-topics">
         <span class="example-label">热门主题：</span>
@@ -68,6 +73,7 @@ const props = defineProps({
 })
 
 const topic = ref('')
+const useLlm = ref(true)
 
 const examples = [
   '2026年全球人工智能发展趋势',
@@ -77,7 +83,7 @@ const examples = [
 
 function handleSubmit() {
   if (topic.value.trim() && !props.loading) {
-    emit('submit', topic.value.trim())
+    emit('submit', topic.value.trim(), useLlm.value)
   }
 }
 </script>
@@ -145,5 +151,11 @@ function handleSubmit() {
 
 .example-tag:hover {
   transform: scale(1.05);
+}
+
+.form-options {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
 }
 </style>

@@ -15,6 +15,7 @@ from typing import List
 from langchain_openai import ChatOpenAI
 
 from config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL_NAME
+from tools.token_tracker import TokenUsageTracker, _extract_token_usage, extract_model_name
 
 logger = logging.getLogger(__name__)
 
@@ -114,9 +115,18 @@ def _generate_report(llm, prompt: str) -> str:
     return response.content
 
 
-async def _generate_report_async(llm, prompt: str) -> str:
+async def _generate_report_async(
+    llm,
+    prompt: str,
+    token_tracker: TokenUsageTracker | None = None,
+) -> str:
     """调用 LLM 生成报告，返回内容 (异步)"""
+    tracker = token_tracker or TokenUsageTracker()
+    tracker.start_call()
     response = await llm.ainvoke(prompt)
+    input_t, output_t = _extract_token_usage(response)
+    model = extract_model_name(response) or OPENAI_MODEL_NAME
+    tracker.end_call(model, input_t, output_t)
     return response.content
 
 
@@ -191,7 +201,13 @@ def _continue_report(llm, report: str, topic: str, results_text: str) -> str:
         return report
 
 
-async def _continue_report_async(llm, report: str, topic: str, results_text: str) -> str:
+async def _continue_report_async(
+    llm,
+    report: str,
+    topic: str,
+    results_text: str,
+    token_tracker: TokenUsageTracker | None = None,
+) -> str:
     """
     续写被截断的报告 (异步)。
     将已有报告发给 LLM，要求从断点继续。
@@ -211,7 +227,12 @@ async def _continue_report_async(llm, report: str, topic: str, results_text: str
 - 务必包含结论或展望章节作为结尾。
 """
     try:
+        tracker = token_tracker or TokenUsageTracker()
+        tracker.start_call()
         response = await llm.ainvoke(prompt)
+        input_t, output_t = _extract_token_usage(response)
+        model = extract_model_name(response) or OPENAI_MODEL_NAME
+        tracker.end_call(model, input_t, output_t)
         continuation = response.content.strip()
         anchor = report[-50:].strip()
         if anchor and anchor in continuation:
@@ -257,17 +278,19 @@ async def writer_node(state: dict) -> dict:
         research_text = "未找到相关搜索结果，请基于你的知识生成报告。"
 
     llm = _build_llm(temperature=0.7)
+    token_tracker = TokenUsageTracker(agent="writer")
 
     # ── 异步生成 ──
     try:
         prompt = _build_prompt(topic, research_text)
-        draft = await _generate_report_async(llm, prompt)
+        draft = await _generate_report_async(llm, prompt, token_tracker)
     except Exception as e:
         logger.error(f"报告生成失败: {e}")
         return {
             "draft_report": "",
             "final_report": "",
             "error": f"报告生成失败: {e}",
+            "token_usage": token_tracker.get_summary(),
         }
 
     # ── 校验 ──
@@ -283,7 +306,7 @@ async def writer_node(state: dict) -> dict:
         )
         try:
             prompt = _build_prompt(topic, research_text, fix_instruction)
-            draft = await _generate_report_async(llm, prompt)
+            draft = await _generate_report_async(llm, prompt, token_tracker)
             logger.info("报告修复完成")
         except Exception as e:
             logger.error(f"报告修复失败，使用原始版本: {e}")
@@ -291,9 +314,13 @@ async def writer_node(state: dict) -> dict:
     # ── 截断检测与续写 ──
     if _is_truncated(draft):
         logger.warning("检测到报告可能被截断，尝试续写")
-        draft = await _continue_report_async(llm, draft, topic, research_text)
+        draft = await _continue_report_async(llm, draft, topic, research_text, token_tracker)
 
-    return {"draft_report": draft, "final_report": draft}
+    return {
+        "draft_report": draft,
+        "final_report": draft,
+        "token_usage": token_tracker.get_summary(),
+    }
 
 
 # ── 同步别名 (用于 LangGraph invoke 兼容) ──

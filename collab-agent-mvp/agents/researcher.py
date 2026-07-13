@@ -18,6 +18,7 @@ from langchain_openai import ChatOpenAI
 
 from config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL_NAME
 from tools.search import deduplicate_results, search
+from tools.token_tracker import TokenUsageTracker, _extract_token_usage, extract_model_name
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +190,12 @@ def _run_tool_loop(llm: ChatOpenAI, llm_with_tools, messages: list) -> AIMessage
     return final_response
 
 
-async def _run_tool_loop_async(llm: ChatOpenAI, llm_with_tools, messages: list) -> AIMessage:
+async def _run_tool_loop_async(
+    llm: ChatOpenAI,
+    llm_with_tools,
+    messages: list,
+    token_tracker: TokenUsageTracker | None = None,
+) -> AIMessage:
     """
     异步工具调用循环：
     1. 调用 LLM（带工具）
@@ -197,15 +203,20 @@ async def _run_tool_loop_async(llm: ChatOpenAI, llm_with_tools, messages: list) 
     3. 重复直到 LLM 返回纯文本内容
     4. 5 轮超限后，用不带工具的 LLM 强制输出 JSON
     """
+    tracker = token_tracker or TokenUsageTracker()
     for attempt in range(5):
+        tracker.start_call()
         response: AIMessage = await llm_with_tools.ainvoke(messages)
+        input_t, output_t = _extract_token_usage(response)
+        model = extract_model_name(response) or OPENAI_MODEL_NAME
+        tracker.end_call(model, input_t, output_t)
 
         logger.debug(f"[async attempt {attempt}] response type: {type(response).__name__}")
         logger.debug(f"[async attempt {attempt}] content: {response.content[:200] if response.content else '(empty)'}")
         logger.debug(f"[async attempt {attempt}] tool_calls: {getattr(response, 'tool_calls', None)}")
 
         if not hasattr(response, "tool_calls") or not response.tool_calls:
-            logger.info(f"异步工具调用循环在 {attempt+1} 轮完成")
+            logger.info(f"异步工具调用循环在 {attempt+1} 轮完成，token 使用: 输入={input_t}, 输出={output_t}")
             return response
 
         messages.append(response)
@@ -236,7 +247,11 @@ async def _run_tool_loop_async(llm: ChatOpenAI, llm_with_tools, messages: list) 
     messages.append(SystemMessage(
         content="你已用完工具调用次数。请基于已有信息，直接输出 JSON 数组结果，不要调用任何工具。"
     ))
+    tracker.start_call()
     final_response: AIMessage = await llm.ainvoke(messages)
+    input_t, output_t = _extract_token_usage(final_response)
+    final_model = extract_model_name(final_response) or OPENAI_MODEL_NAME
+    tracker.end_call(final_model, input_t, output_t)
     return final_response
 
 
@@ -244,12 +259,14 @@ async def researcher_node(state: dict) -> dict:
     """
     异步研究员节点：分析主题 → 搜索信息 → 返回结构化结果
     正确处理 LLM function calling 循环
+    内置 token 用量追踪
     """
     topic = state.get("topic", "")
     if not topic:
         return {"search_results": [], "error": "研究主题为空"}
 
     llm = _build_llm(temperature=0.3)
+    token_tracker = TokenUsageTracker(agent="researcher")
 
     @tool
     def search_tool(query: str) -> str:
@@ -265,9 +282,12 @@ async def researcher_node(state: dict) -> dict:
             SystemMessage(content=RESEARCHER_PROMPT),
             HumanMessage(content=f"研究主题：{topic}"),
         ]
-        response = await _run_tool_loop_async(llm, llm_with_tools, messages)
+        response = await _run_tool_loop_async(llm, llm_with_tools, messages, token_tracker)
         search_results = _parse_json_from_response(response.content)
-        return {"search_results": deduplicate_results(search_results)}
+        return {
+            "search_results": deduplicate_results(search_results),
+            "token_usage": token_tracker.get_summary(),
+        }
     except Exception as e:
         logger.warning(f"第一次 JSON 解析失败，重试: {e}")
 
@@ -278,9 +298,12 @@ async def researcher_node(state: dict) -> dict:
             HumanMessage(content=f"研究主题：{topic}"),
             SystemMessage(content="请确保输出严格的 JSON 数组格式，不要包含额外的文字说明。"),
         ]
-        response = await _run_tool_loop_async(llm, llm_with_tools, messages)
+        response = await _run_tool_loop_async(llm, llm_with_tools, messages, token_tracker)
         search_results = _parse_json_from_response(response.content)
-        return {"search_results": deduplicate_results(search_results)}
+        return {
+            "search_results": deduplicate_results(search_results),
+            "token_usage": token_tracker.get_summary(),
+        }
     except Exception as e:
         logger.error(f"JSON 解析重试仍失败: {e}")
 
@@ -289,12 +312,18 @@ async def researcher_node(state: dict) -> dict:
         try:
             raw_results = search(topic)
             if raw_results:
-                return {"search_results": deduplicate_results(raw_results)}
+                return {
+                    "search_results": deduplicate_results(raw_results),
+                    "token_usage": token_tracker.get_summary(),
+                }
         except Exception as e2:
             logger.error(f"兜底搜索也失败: {e2}")
 
         logger.warning("所有搜索方式均失败，返回空结果（writer 将基于 LLM 知识生成）")
-        return {"search_results": []}
+        return {
+            "search_results": [],
+            "token_usage": token_tracker.get_summary(),
+        }
 
 
 

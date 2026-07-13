@@ -24,6 +24,7 @@ class ResearchState(TypedDict):
     draft_report: str
     final_report: str
     error: str
+    token_usage: dict
 
 
 def create_graph() -> StateGraph:

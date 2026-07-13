@@ -41,6 +41,12 @@
           @cancel="handleCancel"
         />
 
+        <!-- Token Usage Panel -->
+        <TokenUsagePanel
+          v-if="tokenUsage"
+          :token-usage="tokenUsage"
+        />
+
         <!-- Error Alert -->
         <el-alert
           v-if="errorMessage"
@@ -99,11 +105,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { Connection, Clock } from '@element-plus/icons-vue'
 import ResearchInput from './components/ResearchInput.vue'
 import ProgressPanel from './components/ProgressPanel.vue'
 import ReportPanel from './components/ReportPanel.vue'
+import TokenUsagePanel from './components/TokenUsagePanel.vue'
 
 const HISTORY_KEY = 'collab-agent-history'
 
@@ -117,6 +124,7 @@ const backendStatus = ref('checking')
 const currentTaskId = ref('')
 const eventSourceRef = ref(null)
 const historyList = ref([])
+const tokenUsage = ref(null)
 
 const progressStages = reactive([
   { key: 'research', label: '信息搜索', icon: 'Search', done: false, active: false },
@@ -226,6 +234,7 @@ function handleSubmit(topic) {
   reportContent.value = ''
   searchResults.value = []
   currentTaskId.value = ''
+  tokenUsage.value = null
   resetStages()
 
   addLog(`开始研究主题: "${topic}"`, 'info')
@@ -261,6 +270,9 @@ function handleSubmit(topic) {
       if (data.search_results) {
         searchResults.value = data.search_results
       }
+      if (data.token_usage) {
+        tokenUsage.value = data.token_usage
+      }
     } else if (stage === 'writing') {
       currentStage.value = 'writing'
       progressStages[1].active = true
@@ -277,6 +289,9 @@ function handleSubmit(topic) {
     reportContent.value = data.report
     if (data.search_results) {
       searchResults.value = data.search_results
+    }
+    if (data.token_usage) {
+      tokenUsage.value = data.token_usage
     }
     progressStages[2].done = true
     currentStage.value = 'complete'
@@ -311,6 +326,7 @@ function handleClear() {
   reportContent.value = ''
   searchResults.value = []
   progressLog.value = []
+  tokenUsage.value = null
   resetStages()
 }
 </script>

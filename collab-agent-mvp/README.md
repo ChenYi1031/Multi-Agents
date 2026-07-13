@@ -74,6 +74,8 @@
 | 🔑 **请求隔离** | 每次研究请求使用唯一 `thread_id`，并发安全 |
 | 🛑 **任务取消** | `DELETE /research/stream/{task_id}` 优雅取消研究中任务 |
 | 📋 **研究历史** | 前端 localStorage 持久化，最多保留 20 条记录 |
+| 🌙 **暗色主题** | 支持浅色/深色一键切换，CSS 变量全组件适配 |
+| 🌐 **多语言** | 中文/English 即时切换，基于 Vue3 provide/inject 透传
 
 ---
 
@@ -200,12 +202,17 @@ collab-agent-mvp/
 │
 ├── web/                   # Vue 3 + Element Plus 前端
 │   ├── src/
-│   │   ├── App.vue           # 主界面
-│   │   ├── main.js           # 入口
+│   │   ├── App.vue            # 主界面（主题/语言状态管理）
+│   │   ├── main.js            # 入口（注册 Element Plus / 全局 CSS）
+│   │   ├── utils/
+│   │   │   └── i18n.js        # 国际化文本映射（中/英）
 │   │   └── components/
-│   │       ├── ResearchInput.vue   # 研究主题输入
-│   │       ├── ProgressPanel.vue   # SSE 实时进度展示
-│   │       └── ReportPanel.vue     # 报告展示+下载
+│   │       ├── ResearchInput.vue      # 研究主题输入
+│   │       ├── ProgressPanel.vue      # SSE 实时进度展示
+│   │       ├── ReportPanel.vue        # 报告展示+下载
+│   │       ├── SettingsPanel.vue      # 模型供应商 + 主题/语言设置
+│   │       ├── KnowledgePanel.vue     # RAG 知识库上传管理
+│   │       └── TokenUsagePanel.vue    # Token 用量统计与 Agent 明细
 │   ├── index.html
 │   ├── vite.config.js
 │   └── package.json
@@ -235,6 +242,7 @@ collab-agent-mvp/
 | Iteration 7 | 代理自动兜底 + 启动连通性探针 |
 | Iteration 8 | Vue 3 + Element Plus 前端 + SSE 流式展示 + 搜索/探针优化 |
 | Iteration 9 | 全异步化 + SSE 取消 + thread_id 隔离 + 前端历史 + 测试适配 |
+| Iteration 10 | 暗色主题适配（CSS 变量全覆盖）+ 国际化（中/英切换，provide/inject 透传） |
 
 ---
 

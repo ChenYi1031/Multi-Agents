@@ -40,13 +40,7 @@
           @submit="handleSubmit"
         />
 
-        <!-- DAG Visualization -->
-        <DagVisualizer
-          v-if="isResearching || progressStages.some(s => s.done || s.active)"
-          :stages="progressStages"
-        />
-
-        <!-- Progress Panel -->
+        <!-- Progress Panel (圆形进度 + 运行日志) -->
         <ProgressPanel
           v-if="isResearching || progressLog.length > 0"
           :progress-stages="progressStages"
@@ -127,13 +121,13 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import { Connection, Clock } from '@element-plus/icons-vue'
 import ResearchInput from './components/ResearchInput.vue'
 import ProgressPanel from './components/ProgressPanel.vue'
 import ReportPanel from './components/ReportPanel.vue'
 import TokenUsagePanel from './components/TokenUsagePanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
-import DagVisualizer from './components/DagVisualizer.vue'
 import KnowledgePanel from './components/KnowledgePanel.vue'
 
 const HISTORY_KEY = 'collab-agent-history'
@@ -333,6 +327,21 @@ function handleSubmit(topic) {
     try {
       const data = JSON.parse((e.data || '{}'))
       errorMessage.value = data.message || '研究过程发生错误，请重试'
+      // API 错误弹窗（401/超时/Key 错误等）
+      const msg = errorMessage.value
+      if (/API\s*Key|401|403|超时|api_key|auth/i.test(msg)) {
+        ElMessageBox.alert(msg, 'LLM 调用错误', {
+          confirmButtonText: '知道了',
+          type: 'error',
+          dangerouslyUseHTMLString: true,
+          message: `<div style="line-height:1.8">
+            <p>${msg}</p>
+            <p style="font-size:13px;color:#909399;margin-top:8px">
+              请检查「模型供应商」中的 API Key 和 Base URL 配置是否正确。
+            </p>
+          </div>`,
+        })
+      }
     } catch {
       errorMessage.value = eventSource.readyState === EventSource.CLOSED
         ? '连接中断，请检查后端服务是否运行'

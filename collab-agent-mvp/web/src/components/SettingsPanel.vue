@@ -104,9 +104,6 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { Setting, ArrowDown, Plus, Edit, Delete } from '@element-plus/icons-vue'
 
-const STORAGE_KEY = 'collab-agent-providers'
-const ACTIVE_KEY = 'collab-agent-active-provider'
-
 const emit = defineEmits(['change'])
 
 const expanded = ref(false)
@@ -115,6 +112,7 @@ const activeProviderId = ref('')
 const dialogVisible = ref(false)
 const editingProvider = ref(null)
 const newModelName = ref('')
+const loading = ref(false)
 
 const form = reactive({
   name: '', baseUrl: '', apiKey: '', apiFormat: 'openai', models: [], selectedModel: '',
@@ -125,23 +123,42 @@ const formValid = computed(() => form.name.trim() && form.baseUrl.trim() && form
 
 onMounted(loadProviders)
 
-function loadProviders() {
+async function loadProviders() {
+  loading.value = true
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    providers.value = raw ? JSON.parse(raw) : []
-    activeProviderId.value = localStorage.getItem(ACTIVE_KEY) || ''
-    if (activeProviderId.value && !providers.value.find(p => p.id === activeProviderId.value)) {
-      activeProviderId.value = providers.value.length > 0 ? providers.value[0].id : ''
+    const res = await fetch('/settings')
+    if (res.ok) {
+      const data = await res.json()
+      providers.value = data.providers || []
+      activeProviderId.value = data.active_provider_id || ''
+    } else {
+      // fallback to empty
+      providers.value = []
     }
-  } catch { providers.value = [] }
+  } catch {
+    providers.value = []
+  } finally {
+    loading.value = false
+  }
+  // validate activeProviderId
+  if (activeProviderId.value && !providers.value.find(p => p.id === activeProviderId.value)) {
+    activeProviderId.value = providers.value.length > 0 ? providers.value[0].id : ''
+  }
 }
 
-function saveToStorage() {
+async function saveToStorage() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(providers.value))
-    if (activeProviderId.value) localStorage.setItem(ACTIVE_KEY, activeProviderId.value)
-    else localStorage.removeItem(ACTIVE_KEY)
-  } catch { /* ok */ }
+    await fetch('/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        providers: providers.value,
+        active_provider_id: activeProviderId.value,
+      }),
+    })
+  } catch (e) {
+    console.error('保存配置失败', e)
+  }
 }
 
 function openAddDialog() {

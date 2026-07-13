@@ -146,6 +146,52 @@ def _sse_safe(event: str, data: dict) -> str:
         return _sse("error", {"message": "服务内部错误: 数据序列化失败"})
 
 
+# ── Settings 存储（服务端 settings.json） ──
+_SETTINGS_FILE = Path(__file__).resolve().parent / "settings.json"
+
+
+def _load_settings() -> dict:
+    """读取 settings.json，不存在时返回默认结构"""
+    if _SETTINGS_FILE.exists():
+        try:
+            return json.loads(_SETTINGS_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"settings.json 读取失败: {e}")
+    return {"providers": [], "active_provider_id": ""}
+
+
+def _save_settings(data: dict) -> None:
+    """写入 settings.json"""
+    _SETTINGS_FILE.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+@app.get("/settings")
+async def get_settings():
+    """读取供应商配置"""
+    return _load_settings()
+
+
+@app.post("/settings")
+async def post_settings(data: dict):
+    """保存供应商配置"""
+    try:
+        _save_settings(data)
+        return {"status": "ok"}
+    except Exception as e:
+        logger.exception(f"保存 settings 失败: {e}")
+        return JSONResponse(status_code=500, content={"status": "error", "detail": str(e)})
+
+
+@app.delete("/settings")
+async def delete_settings():
+    """重置 settings.json 为默认值"""
+    _save_settings({"providers": [], "active_provider_id": ""})
+    return {"status": "ok", "message": "配置已重置"}
+
+
 # ── 启动时连通性检查 ──
 @app.on_event("startup")
 async def startup_probe():
